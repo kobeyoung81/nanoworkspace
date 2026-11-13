@@ -203,6 +203,13 @@ export type PortalUIText = {
    * takes it over, only this reference changes.
    */
   FilePanel: ComponentType<{ agentId: string; allowUpload?: boolean }>
+  Textarea: ComponentType<{
+    value?: string
+    className?: string
+    placeholder?: string
+    readOnly?: boolean
+    onChange?: (event: ChangeEvent<HTMLTextAreaElement>) => void
+  }>
 }
 
 /** What a page may ask the platform for; every call carries the caller's token. */
@@ -212,7 +219,7 @@ export type PortalApi = {
   patch: <T>(path: string, body: unknown, base?: string) => Promise<T>
   del: <T>(path: string, base?: string) => Promise<T>
   /** Hosts of the platform APIs, so a page never spells a URL itself. */
-  bases: { portalConsole: string; admin: string; user: string }
+  bases: { portalConsole: string; admin: string; user: string; workspace: string }
 }
 
 /**
@@ -230,6 +237,7 @@ export type PortalFeatures = {
 /** Transient feedback, in the shell's own notification style. */
 export type PortalToast = {
   success: (message: string) => void
+  info: (message: string) => void
   error: (message: string) => void
 }
 

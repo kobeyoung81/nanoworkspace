@@ -10,6 +10,7 @@ import { ArrowLeft, FolderTree, RefreshCw } from 'lucide-react'
 import type { PageContext } from './contract'
 import type { AgentSummary } from './types'
 import { useApi } from './useApi'
+import { FilePanel } from './components/FilePanel'
 
 /** The agent the URL asks for (`?agent=`), read once at mount. */
 function agentFromLocation(): string | null {
@@ -31,7 +32,6 @@ export function FilesPage({ ctx }: { ctx: PageContext }) {
     Skeleton,
     EmptyState,
     Badge,
-    FilePanel,
   } = ui
 
   const [selectedAgent, setSelectedAgent] = useState<string | null>(agentFromLocation)
@@ -110,7 +110,7 @@ export function FilesPage({ ctx }: { ctx: PageContext }) {
       ) : selectedAgent ? (
         <Card className="h-[calc(100vh-16rem)] min-h-96">
           <CardContent className="h-full p-0">
-            <FilePanel key={selectedAgent} agentId={selectedAgent} allowUpload />
+            <FilePanel ctx={ctx} key={selectedAgent} agentId={selectedAgent} allowUpload />
           </CardContent>
         </Card>
       ) : (
