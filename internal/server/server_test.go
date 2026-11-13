@@ -211,3 +211,31 @@ func TestUploadLimitIsEnforced(t *testing.T) {
 		t.Fatal("an oversized upload reached the container")
 	}
 }
+
+// TestCanonicalWorkspacePrefixServesTheSameSurface: /api/v1/workspace/… is the
+// target-state prefix, where the path names the module that owns it. The
+// historical /api/user/v1/… stays as an alias, and both put the same request on
+// the container's tunnel.
+func TestCanonicalWorkspacePrefixServesTheSameSurface(t *testing.T) {
+	srv, key, seen := testServer(t, http.StatusOK, `{"entries":[]}`)
+	token := mintToken(t, key, "alice", auth.RoleUser)
+
+	if got := do(t, srv, http.MethodGet, "/api/v1/workspace/files/agent-1?path=notes", token, "").StatusCode; got != http.StatusOK {
+		t.Fatalf("files: status = %d, want 200", got)
+	}
+	if got := do(t, srv, http.MethodGet, "/api/v1/workspace/git/agent-1/status?path=repo", token, "").StatusCode; got != http.StatusOK {
+		t.Fatalf("git: status = %d, want 200", got)
+	}
+	if len(*seen) != 2 {
+		t.Fatalf("requests that reached the tunnel = %d, want 2", len(*seen))
+	}
+	if got := (*seen)[0].Path; got != "/api/v1/files/agent-1?path=notes" {
+		t.Fatalf("forwarded path = %q", got)
+	}
+	if got := (*seen)[1].Path; got != "/api/v1/git/agent-1/status?path=repo" {
+		t.Fatalf("git path = %q", got)
+	}
+	if got := do(t, srv, http.MethodGet, "/api/v1/workspace/files/agent-1", "", "").StatusCode; got != http.StatusUnauthorized {
+		t.Fatalf("canonical prefix without a token: status = %d, want 401", got)
+	}
+}

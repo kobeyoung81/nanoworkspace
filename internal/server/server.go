@@ -21,6 +21,21 @@ import (
 	"gitee.com/kobeyoung81/nanoworkspace/internal/tunnel"
 )
 
+// browserPrefixes are the mounts of this surface: the historical user prefix and
+// the target-state module prefix. The container's hypervisor serves the same
+// routes under /api/v1, which is what hypervisorPath builds.
+var browserPrefixes = []string{"/api/user/v1", "/api/v1/workspace"}
+
+// hypervisorPath rewrites a browser path onto the container's namespace.
+func hypervisorPath(p string) string {
+	for _, prefix := range browserPrefixes {
+		if rest, ok := strings.CutPrefix(p, prefix); ok {
+			return "/api/v1" + rest
+		}
+	}
+	return "/api/v1" + p
+}
+
 // maxFileBytes mirrors the hypervisor's 10 MiB limit and the portal's old cap:
 // buffering more than the other end accepts only wastes memory.
 const maxFileBytes = 10 << 20
@@ -40,16 +55,27 @@ func New(addr string, jwt *auth.Validator, ag *agents.Client, tn *tunnel.Client)
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 	})
-	mux.HandleFunc("GET /api/user/v1/files/{agentID}", s.handleList)
-	mux.HandleFunc("GET /api/user/v1/files/{agentID}/content", s.handleContentGET)
-	mux.HandleFunc("PUT /api/user/v1/files/{agentID}/content", s.handleContentPUT)
-	mux.HandleFunc("DELETE /api/user/v1/files/{agentID}/content", s.handleContentDELETE)
-	mux.HandleFunc("POST /api/user/v1/files/{agentID}/mkdir", s.handleMkdir)
-	mux.HandleFunc("POST /api/user/v1/files/{agentID}/rename", s.handleRename)
-	mux.HandleFunc("POST /api/user/v1/files/{agentID}/copy", s.handleCopy)
-	mux.HandleFunc("/api/user/v1/git/{agentID}/{rest...}", s.handleGit)
+	// Two prefixes, one implementation. /api/user/v1/ is the browser's
+	// historical path; /api/v1/workspace/ is the target-state one, where the
+	// module is named in the path so every prefix has exactly one owner. The old
+	// prefix stays as an alias until no caller uses it.
+	for _, prefix := range browserPrefixes {
+		s.registerFileRoutes(mux, prefix)
+	}
 	s.srv = &http.Server{Addr: addr, Handler: s.authenticate(mux), ReadHeaderTimeout: 10 * time.Second}
 	return s
+}
+
+// registerFileRoutes mounts the file and git surface under one prefix.
+func (s *Server) registerFileRoutes(mux *http.ServeMux, prefix string) {
+	mux.HandleFunc("GET "+prefix+"/files/{agentID}", s.handleList)
+	mux.HandleFunc("GET "+prefix+"/files/{agentID}/content", s.handleContentGET)
+	mux.HandleFunc("PUT "+prefix+"/files/{agentID}/content", s.handleContentPUT)
+	mux.HandleFunc("DELETE "+prefix+"/files/{agentID}/content", s.handleContentDELETE)
+	mux.HandleFunc("POST "+prefix+"/files/{agentID}/mkdir", s.handleMkdir)
+	mux.HandleFunc("POST "+prefix+"/files/{agentID}/rename", s.handleRename)
+	mux.HandleFunc("POST "+prefix+"/files/{agentID}/copy", s.handleCopy)
+	mux.HandleFunc(prefix+"/git/{agentID}/{rest...}", s.handleGit)
 }
 
 // ListenAndServe blocks until the listener closes.
@@ -228,10 +254,9 @@ func (s *Server) handleGit(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	// The user routes live under /api/user/v1; the hypervisor serves the same
-	// shape under /api/v1.
-	suffix := strings.TrimPrefix(r.URL.Path, "/api/user/v1")
-	path := "/api/v1" + suffix
+	// The browser's prefix differs from the hypervisor's; the rest of the path
+	// is forwarded verbatim, so the panel and the container agree on operations.
+	path := hypervisorPath(r.URL.Path)
 	if q := r.URL.RawQuery; q != "" {
 		path += "?" + q
 	}
