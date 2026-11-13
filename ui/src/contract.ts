@@ -1,0 +1,280 @@
+// The portal's page contract, copied.
+//
+// `nanoportal/web/src/portal/contract.ts` is the source of truth; this build keeps
+// its own copy so the two do not import each other. A field added there must be
+// copied here before a page may rely on it — the plugin's `tsc` fails otherwise,
+// which is the check that keeps them in step.
+//
+// `DockId` is inlined: a plugin must not import the shell's source tree.
+
+import type { ChangeEvent, ComponentType, ReactNode } from 'react'
+
+/** The docks a panel may open in; the shell owns the list. */
+type DockId = 'left' | 'center' | 'right' | 'bottom'
+
+/** The plugin contract this shell speaks. Bump only with a release window. */
+export const CONTRACT_VERSION = 1
+
+/** A string per language tag, e.g. `{ "zh-CN": "作品库", en: "Library" }`. */
+export type LocalizedText = Record<string, string>
+
+/**
+ * Icons a manifest may name. A remote cannot ship a React component, and an
+ * arbitrary SVG from the network would be a styling and safety problem, so the
+ * vocabulary is closed and mapped to the shell's own icons.
+ */
+export const PANEL_ICONS = ['layers', 'file-text', 'folder', 'layout-grid', 'book-open'] as const
+export type PanelIcon = (typeof PANEL_ICONS)[number]
+
+/**
+ * How a panel's content is produced.
+ *
+ * - `module` is a component the shell loads at runtime (Module Federation
+ *   remote). It renders inside the shell's React tree, so it inherits theme,
+ *   i18n and the drag/resize behaviour.
+ * - `frame` carries an application that cannot share the shell's stack. It is
+ *   the boundary for heterogeneous or third-party UIs.
+ */
+export type PanelMount =
+  | { kind: 'module'; module: string; export: string }
+  | { kind: 'frame'; url: string }
+
+export type PanelContribution = {
+  /** Panel id inside its plugin; the shell prefixes it with the plugin id. */
+  id: string
+  title: LocalizedText
+  icon: PanelIcon
+  /** Where a fresh browser puts the panel; the user can move it afterwards. */
+  slot: DockId
+  mount: PanelMount
+}
+
+/**
+ * What a panel gets from the shell. Every field is data the shell already owns:
+ * a plugin never reaches into the shell's storage, router or theme.
+ */
+export type PortalContext = {
+  token: string
+  userId: string
+  locale: string
+  theme: 'light' | 'dark'
+  navigate: (path: string) => void
+  openPanel: (panelId: string) => void
+}
+
+/**
+ * A whole page a plugin contributes: the shell mounts it at `path` instead of
+ * its own built-in page for that route.
+ *
+ * A page is the same kind of contribution as a panel — a module the shell loads
+ * at runtime — with one difference: it owns the route. That is what lets a
+ * module ship a screen (the work library, the account pages) without the shell
+ * importing its code, and without an iframe boundary it does not need.
+ */
+export type PageContribution = {
+  /** Page id inside its plugin; the shell prefixes it with the plugin id. */
+  id: string
+  /** The shell route this page answers, e.g. `/artifacts`. */
+  path: string
+  title: LocalizedText
+  mount: PanelMount
+}
+
+/**
+ * The shell's component kit, handed to a page through its context.
+ *
+ * A module front end shares the shell's React instance but not its source, so a
+ * page cannot import the design system. Passing the components through the
+ * context keeps one implementation of each control (and one set of compiled
+ * styles) while the page stays in its own application.
+ *
+ * The prop types are structural on purpose: they are the contract, not a
+ * re-export of the shell's internals. A prop a page needs must be added here
+ * before any page may rely on it.
+ */
+type Children = { children?: ReactNode }
+
+export type PortalUIText = {
+  Button: ComponentType<
+    Children & {
+      variant?: 'default' | 'outline' | 'ghost' | 'secondary' | 'destructive'
+      size?: 'default' | 'sm' | 'lg' | 'icon'
+      type?: 'button' | 'submit'
+      className?: string
+      disabled?: boolean
+      title?: string
+      onClick?: () => void
+    }
+  >
+  Input: ComponentType<{
+    type?: string
+    value?: string
+    placeholder?: string
+    className?: string
+    disabled?: boolean
+    autoComplete?: string
+    onChange?: (event: ChangeEvent<HTMLInputElement>) => void
+  }>
+  Card: ComponentType<Children & { className?: string }>
+  CardHeader: ComponentType<Children & { className?: string }>
+  CardTitle: ComponentType<Children & { className?: string }>
+  CardDescription: ComponentType<Children & { className?: string }>
+  CardContent: ComponentType<Children & { className?: string }>
+  Badge: ComponentType<
+    Children & {
+      variant?: 'default' | 'secondary' | 'outline' | 'success' | 'warning' | 'danger' | 'info'
+      className?: string
+    }
+  >
+  Skeleton: ComponentType<{ className?: string }>
+  EmptyState: ComponentType<{
+    title: string
+    description?: string
+    icon?: ComponentType<{ className?: string }>
+    action?: ReactNode
+    className?: string
+  }>
+  Table: ComponentType<Children & { className?: string; stacked?: boolean }>
+  TableHeader: ComponentType<Children & { className?: string }>
+  TableBody: ComponentType<Children & { className?: string }>
+  TableRow: ComponentType<Children & { className?: string; onClick?: () => void }>
+  TableHead: ComponentType<Children & { className?: string }>
+  TableCell: ComponentType<Children & { className?: string; label?: ReactNode }>
+  Pagination: ComponentType<{
+    page: number
+    pageSize: number
+    total: number
+    onPageChange: (page: number) => void
+    onPageSizeChange?: (size: number) => void
+  }>
+  StatusBadge: ComponentType<{ status: string; className?: string }>
+  Select: ComponentType<{
+    value: string
+    onValueChange: (value: string) => void
+    disabled?: boolean
+    children?: ReactNode
+  }>
+  SelectTrigger: ComponentType<Children & { className?: string; disabled?: boolean }>
+  SelectValue: ComponentType<{ placeholder?: string }>
+  SelectContent: ComponentType<Children & { className?: string }>
+  SelectItem: ComponentType<Children & { value: string; disabled?: boolean }>
+  PageHeader: ComponentType<{
+    title: ReactNode
+    subtitle?: ReactNode
+    actions?: ReactNode
+    backTo?: string
+    backLabel?: ReactNode
+    className?: string
+  }>
+  FormField: ComponentType<{ label: string; hint?: string; error?: string; className?: string; children: ReactNode }>
+  MetricCard: ComponentType<{
+    icon: ComponentType<{ className?: string }>
+    label: string
+    value?: ReactNode
+    sub?: ReactNode
+    loading?: boolean
+    className?: string
+  }>
+  Tooltip: ComponentType<Children & { delayDuration?: number }>
+  TooltipTrigger: ComponentType<Children & { asChild?: boolean }>
+  TooltipContent: ComponentType<Children & { className?: string; sideOffset?: number }>
+  ConfirmDialog: ComponentType<{
+    open: boolean
+    onOpenChange: (open: boolean) => void
+    title: string
+    description?: string
+    confirmLabel?: string
+    onConfirm: () => Promise<void> | void
+    busy?: boolean
+  }>
+  Separator: ComponentType<{ orientation?: 'horizontal' | 'vertical'; className?: string }>
+  Dialog: ComponentType<Children & { open: boolean; onOpenChange: (open: boolean) => void }>
+  DialogContent: ComponentType<Children & { className?: string }>
+  DialogHeader: ComponentType<Children>
+  DialogTitle: ComponentType<Children>
+  DialogDescription: ComponentType<Children>
+  DialogFooter: ComponentType<Children>
+  /**
+   * The file browser, as a component.
+   *
+   * It is far too large to freeze as a prop list, and it belongs to this shell
+   * until the workspace module ships its own; handing the component over keeps one
+   * implementation while the page that embeds it lives elsewhere. When workspace
+   * takes it over, only this reference changes.
+   */
+  FilePanel: ComponentType<{ agentId: string; allowUpload?: boolean }>
+}
+
+/** What a page may ask the platform for; every call carries the caller's token. */
+export type PortalApi = {
+  get: <T>(path: string, base?: string) => Promise<T>
+  post: <T>(path: string, body: unknown, base?: string) => Promise<T>
+  patch: <T>(path: string, body: unknown, base?: string) => Promise<T>
+  del: <T>(path: string, base?: string) => Promise<T>
+  /** Hosts of the platform APIs, so a page never spells a URL itself. */
+  bases: { portalConsole: string; admin: string; user: string }
+}
+
+/**
+ * Shell capabilities a page may invoke.
+ *
+ * These are features, not components: the agent editor is the portal's (it owns the
+ * agent rows), so a page asks the shell to open it instead of rebuilding it. A
+ * request names what to edit; the shell loads it and owns the dialog's lifetime.
+ */
+export type PortalFeatures = {
+  /** Open the agent editor. With an id the shell loads that agent first. */
+  openAgentForm: (request: { userId: string; agentId?: string; onSaved?: () => void }) => void
+}
+
+/** Transient feedback, in the shell's own notification style. */
+export type PortalToast = {
+  success: (message: string) => void
+  error: (message: string) => void
+}
+
+/** What a page gets: the panel context plus the shell's kit, strings and data client. */
+export type PageContext = PortalContext & {
+  t: (key: string, options?: Record<string, unknown>) => string
+  /** The route's parameters (`:id` and friends), read-only. */
+  params: Record<string, string>
+  /** Publish an entity name to the shell's breadcrumb; null clears it. */
+  setCrumb: (label: string | null, title?: string) => void
+  ui: PortalUIText
+  api: PortalApi
+  features: PortalFeatures
+  toast: PortalToast
+}
+
+/** A page component, as exported by a `module` mount. */
+export type PageComponent = ComponentType<{ ctx: PageContext }>
+
+/** A panel component, as exported by a `module` mount. */
+export type PanelComponent = ComponentType<{ ctx: PortalContext }>
+
+/** What an application publishes at <base>/plugin.json. */
+export type RemoteManifest = {
+  contract: number
+  plugin: string
+  /** Remote entry of the module federation build, same-origin path. */
+  entry: string
+  panels: PanelContribution[]
+  /** Routes this plugin takes over. Optional: a plugin may contribute panels only. */
+  pages?: PageContribution[]
+}
+
+/** The shell's own table: which plugins load, and which panels the shell ships. */
+export type ShellManifest = {
+  contract: number
+  plugins: Record<string, ShellPluginEntry>
+}
+
+export type ShellPluginEntry = {
+  impl?: string
+  /** Same-origin path to the application's manifest (module plugins). */
+  manifest?: string
+  /** Panel ids this entry contributes, in activity-bar order (the shell). */
+  panels?: string[]
+}
+
+export type ParseResult<T> = { ok: true; value: T } | { ok: false; error: string }

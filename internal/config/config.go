@@ -25,6 +25,10 @@ type Config struct {
 	// second attempt.
 	ProvisionerURL string
 	BusURL         string
+	// UIDir is the built front end this module contributes to the portal (served
+	// at /plugins/workspace/). Empty disables it: the module still works, the portal
+	// then shows its own page.
+	UIDir string
 	// InternalToken authenticates this service to the portal, the provisioner
 	// and the bus. Empty means every call fails rather than travelling unauthenticated.
 	InternalToken string
@@ -38,6 +42,7 @@ func Load() Config {
 		PortalURL:      env("NANOSEC_PORTAL_URL", "http://nanoportal:80"),
 		ProvisionerURL: env("NANOSEC_PROVISIONER_URL", "http://nanorunner:8080"),
 		BusURL:         env("NANOSEC_BUS_URL", "http://nanobus:9000"),
+		UIDir:          env("NANOSEC_WORKSPACE_UI_DIR", "/app/ui"),
 		InternalToken:  os.Getenv("NANOSEC_BUS_INTERNAL_TOKEN"),
 	}
 }

@@ -48,13 +48,15 @@ type Server struct {
 	srv     *http.Server
 }
 
-// New builds the server.
-func New(addr string, jwt *auth.Validator, ag *agents.Client, tn *tunnel.Client) *Server {
+// New builds the server. uiDir optionally carries this module's front end (see
+// plugin_files.go); an empty directory just means "no page from this module".
+func New(addr string, jwt *auth.Validator, ag *agents.Client, tn *tunnel.Client, uiDir string) *Server {
 	s := &Server{jwt: jwt, agents: ag, tunnels: tn}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 	})
+	s.registerUIRoutes(mux, uiDir)
 	// Two prefixes, one implementation. /api/user/v1/ is the browser's
 	// historical path; /api/v1/workspace/ is the target-state one, where the
 	// module is named in the path so every prefix has exactly one owner. The old
@@ -84,10 +86,11 @@ func (s *Server) ListenAndServe() error { return s.srv.ListenAndServe() }
 // Shutdown stops the listener.
 func (s *Server) Shutdown() error { return s.srv.Close() }
 
-// authenticate requires a valid browser token on every route but the probe.
+// authenticate requires a valid browser token on every route but the probe and
+// this module's front end (a script tag carries no token; the page's data calls do).
 func (s *Server) authenticate(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/healthz" {
+		if isPublicPath(r.URL.Path) {
 			next.ServeHTTP(w, r)
 			return
 		}

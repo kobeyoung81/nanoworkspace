@@ -1,0 +1,21 @@
+{
+  "contract": 1,
+  "plugin": "workspace",
+  "entry": "/plugins/workspace/remoteEntry.js",
+  "panels": [],
+  "pages": [
+    {
+      "id": "files",
+      "path": "/files",
+      "title": {
+        "zh-CN": "文件",
+        "en": "Files"
+      },
+      "mount": {
+        "kind": "module",
+        "module": "workspace/pages",
+        "export": "FilesPage"
+      }
+    }
+  ]
+}

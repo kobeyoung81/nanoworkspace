@@ -45,6 +45,7 @@ func main() {
 		auth.NewValidator(cfg.JWKSURL),
 		agents.New(cfg.PortalURL, cfg.InternalToken),
 		tunnel.New(cfg.ProvisionerURL, cfg.BusURL, cfg.InternalToken),
+		cfg.UIDir,
 	)
 
 	sigCh := make(chan os.Signal, 1)

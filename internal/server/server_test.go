@@ -80,7 +80,7 @@ func testServer(t *testing.T, tunnelStatus int, tunnelBody string) (*httptest.Se
 	}))
 	t.Cleanup(tunnelSrv.Close)
 
-	s := New(":0", auth.NewValidator(jwks.URL), agents.New(portal.URL, "token"), tunnel.New(tunnelSrv.URL, "", "token"))
+	s := New(":0", auth.NewValidator(jwks.URL), agents.New(portal.URL, "token"), tunnel.New(tunnelSrv.URL, "", "token"), "")
 	web := httptest.NewServer(s.srv.Handler)
 	t.Cleanup(web.Close)
 	return web, key, &seen
