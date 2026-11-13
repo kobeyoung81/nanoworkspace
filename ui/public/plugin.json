@@ -17,5 +17,11 @@
         "export": "FilesPage"
       }
     }
-  ]
+  ],
+  "provides": {
+    "filePanel": {
+      "module": "workspace/pages",
+      "export": "FilePanel"
+    }
+  }
 }
