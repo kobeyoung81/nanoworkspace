@@ -18,6 +18,7 @@ import (
 	"gitee.com/kobeyoung81/nanoprotocol"
 	"gitee.com/kobeyoung81/nanoworkspace/internal/agents"
 	"gitee.com/kobeyoung81/nanoworkspace/internal/auth"
+	"gitee.com/kobeyoung81/nanoworkspace/internal/metrics"
 	"gitee.com/kobeyoung81/nanoworkspace/internal/tunnel"
 )
 
@@ -56,6 +57,8 @@ func New(addr string, jwt *auth.Validator, ag *agents.Client, tn *tunnel.Client,
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 	})
+	// Operational numbers, anonymous; isPublicPath keeps it out of the token check.
+	mux.Handle("GET /metrics", metrics.Handler())
 	s.registerUIRoutes(mux, uiDir)
 	// Two prefixes, one implementation. /api/user/v1/ is the browser's
 	// historical path; /api/v1/workspace/ is the target-state one, where the
@@ -64,7 +67,7 @@ func New(addr string, jwt *auth.Validator, ag *agents.Client, tn *tunnel.Client,
 	for _, prefix := range browserPrefixes {
 		s.registerFileRoutes(mux, prefix)
 	}
-	s.srv = &http.Server{Addr: addr, Handler: s.authenticate(mux), ReadHeaderTimeout: 10 * time.Second}
+	s.srv = &http.Server{Addr: addr, Handler: metrics.Middleware(s.authenticate(mux)), ReadHeaderTimeout: 10 * time.Second}
 	return s
 }
 

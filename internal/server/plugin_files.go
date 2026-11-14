@@ -50,5 +50,5 @@ func (s *Server) registerUIRoutes(mux *http.ServeMux, dir string) {
 // isPublicPath reports whether a request must skip the token check: the probe and
 // this module's own front end.
 func isPublicPath(path string) bool {
-	return path == "/healthz" || strings.HasPrefix(path, uiPath)
+	return path == "/healthz" || path == "/metrics" || strings.HasPrefix(path, uiPath)
 }
