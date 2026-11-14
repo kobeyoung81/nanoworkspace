@@ -281,6 +281,7 @@ export type PortalUIText = {
     disabled?: boolean
     className?: string
     'aria-label'?: string
+    'aria-readonly'?: boolean
   }>
   Separator: ComponentType<{ orientation?: 'horizontal' | 'vertical'; className?: string }>
   Spinner: ComponentType<{ label?: string; className?: string }>
@@ -339,6 +340,7 @@ export type PortalUIText = {
 export type PortalApi = {
   get: <T>(path: string, base?: string) => Promise<T>
   post: <T>(path: string, body: unknown, base?: string) => Promise<T>
+  put: <T>(path: string, body: unknown, base?: string) => Promise<T>
   patch: <T>(path: string, body: unknown, base?: string) => Promise<T>
   del: <T>(path: string, base?: string) => Promise<T>
   /** Hosts of the platform APIs, so a page never spells a URL itself. */
