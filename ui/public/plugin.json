@@ -2,7 +2,22 @@
   "contract": 1,
   "plugin": "workspace",
   "entry": "/plugins/workspace/remoteEntry.js",
-  "panels": [],
+  "panels": [
+    {
+      "id": "git",
+      "title": {
+        "zh-CN": "Git",
+        "en": "Git"
+      },
+      "icon": "folder",
+      "slot": "right",
+      "mount": {
+        "kind": "module",
+        "module": "workspace/panels",
+        "export": "GitPanel"
+      }
+    }
+  ],
   "pages": [
     {
       "id": "files",

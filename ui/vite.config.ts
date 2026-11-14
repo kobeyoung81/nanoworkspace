@@ -16,7 +16,10 @@ export default defineConfig({
     federation({
       name: 'workspace',
       filename: 'remoteEntry.js',
-      exposes: { './pages': './src/pages.tsx' },
+      exposes: {
+        './pages': './src/pages.tsx',
+        './panels': './src/panels.tsx',
+      },
       shared: {
         react: { singleton: true, import: false },
         'react-dom': { singleton: true, import: false },

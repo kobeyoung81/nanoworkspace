@@ -8,7 +8,10 @@
 
 import type { PageContext } from './contract'
 
-export type Host = Pick<PageContext, 't' | 'locale' | 'token' | 'userId' | 'ui' | 'api' | 'toast' | 'navigate'>
+export type Host = Pick<
+  PageContext,
+  't' | 'locale' | 'token' | 'userId' | 'ui' | 'api' | 'toast' | 'navigate' | 'agentId'
+>
 
 let current: Host | null = null
 

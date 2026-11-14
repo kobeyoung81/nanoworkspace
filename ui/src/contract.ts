@@ -1,9 +1,9 @@
-// The portal's page contract, copied.
+// The portal's page and panel contract, copied.
 //
 // `nanoportal/web/src/portal/contract.ts` is the source of truth; this build keeps
 // its own copy so the two do not import each other. A field added there must be
-// copied here before a page may rely on it — the plugin's `tsc` fails otherwise,
-// which is the check that keeps them in step.
+// copied here before a page or panel may rely on it — the plugin's `tsc` fails
+// otherwise, which is the check that keeps them in step.
 //
 // `DockId` is inlined: a plugin must not import the shell's source tree.
 
@@ -60,6 +60,20 @@ export type PortalContext = {
   theme: 'light' | 'dark'
   navigate: (path: string) => void
   openPanel: (panelId: string) => void
+  /** The agent the shell is focused on; a workbench panel always gets one. */
+  agentId?: string
+}
+
+/**
+ * What a workbench panel gets: the panel context plus the shell's strings, kit,
+ * data client and notifications. A panel lives in the shell's tree like a page, so
+ * it needs the same services — without the route plumbing a page has.
+ */
+export type PanelContext = PortalContext & {
+  t: (key: string, options?: Record<string, unknown>) => string
+  ui: PortalUIText
+  api: PortalApi
+  toast: PortalToast
 }
 
 /**
@@ -188,6 +202,34 @@ export type PortalUIText = {
     busy?: boolean
   }>
   Separator: ComponentType<{ orientation?: 'horizontal' | 'vertical'; className?: string }>
+  Spinner: ComponentType<{ label?: string; className?: string }>
+  DropdownMenu: ComponentType<{
+    open?: boolean
+    onOpenChange?: (open: boolean) => void
+    children?: ReactNode
+  }>
+  DropdownMenuTrigger: ComponentType<Children & { asChild?: boolean; className?: string }>
+  DropdownMenuContent: ComponentType<Children & { align?: 'start' | 'center' | 'end'; className?: string }>
+  DropdownMenuItem: ComponentType<
+    Children & {
+      className?: string
+      disabled?: boolean
+      onSelect?: (event: { preventDefault: () => void }) => void
+    }
+  >
+  DropdownMenuLabel: ComponentType<Children & { className?: string }>
+  DropdownMenuSeparator: ComponentType<{ className?: string }>
+  HeightResizeHandle: ComponentType<{
+    value: number
+    min: number
+    max: number
+    onChange: (value: number) => void
+    expandBy?: 'up' | 'down'
+    onReset?: () => void
+    className?: string
+    label?: string
+    hint?: string
+  }>
   Dialog: ComponentType<Children & { open: boolean; onOpenChange: (open: boolean) => void }>
   DialogContent: ComponentType<Children & { className?: string }>
   DialogHeader: ComponentType<Children>
@@ -258,7 +300,7 @@ export type PageContext = PortalContext & {
 export type PageComponent = ComponentType<{ ctx: PageContext }>
 
 /** A panel component, as exported by a `module` mount. */
-export type PanelComponent = ComponentType<{ ctx: PortalContext }>
+export type PanelComponent = ComponentType<{ ctx: PanelContext }>
 
 /** What an application publishes at <base>/plugin.json. */
 export type RemoteManifest = {
@@ -269,6 +311,15 @@ export type RemoteManifest = {
   panels: PanelContribution[]
   /** Routes this plugin takes over. Optional: a plugin may contribute panels only. */
   pages?: PageContribution[]
+  /**
+   * Components the shell may borrow, by role.
+   *
+   * The file browser is the one case: `filePanel` names the export a page renders
+   * when it needs to show an agent's files. Naming it in the manifest keeps the
+   * shell from hardcoding another module's module path, and lets the owner move
+   * the component without a shell release.
+   */
+  provides?: Record<string, { module: string; export: string }>
 }
 
 /** The shell's own table: which plugins load, and which panels the shell ships. */
