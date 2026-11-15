@@ -44,6 +44,19 @@
         "module": "workspace/pages",
         "export": "FileViewerPage"
       }
+    },
+    {
+      "id": "agent",
+      "path": "/agent",
+      "title": {
+        "zh-CN": "智能体",
+        "en": "Agent"
+      },
+      "mount": {
+        "kind": "module",
+        "module": "workspace/pages",
+        "export": "AgentPage"
+      }
     }
   ],
   "provides": {

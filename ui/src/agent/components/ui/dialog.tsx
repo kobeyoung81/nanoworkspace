@@ -1,0 +1,10 @@
+// The shell's component, forwarded from the host (see ../../../../ui/shim).
+
+import { pick } from './shim'
+
+export const Dialog = pick('Dialog')
+export const DialogContent = pick('DialogContent')
+export const DialogDescription = pick('DialogDescription')
+export const DialogFooter = pick('DialogFooter')
+export const DialogHeader = pick('DialogHeader')
+export const DialogTitle = pick('DialogTitle')

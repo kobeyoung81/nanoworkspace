@@ -92,6 +92,13 @@ export type SessionSnapshot = {
   display_name?: string
   /** Set by an administrator's password reset; the shell forces the change page. */
   must_change_password?: boolean
+  /**
+   * The tokens a sign-in just issued. The shell owns the stored session, so a page
+   * that signs in hands them over rather than writing storage itself — without them
+   * the "session" would have an identity but no credential.
+   */
+  access_token?: string
+  refresh_token?: string
 }
 
 /**
@@ -339,6 +346,10 @@ export type PortalUIText = {
   >
   DropdownMenuLabel: ComponentType<Children & { className?: string }>
   DropdownMenuSeparator: ComponentType<{ className?: string }>
+  /** A submenu: the agent list nests "move to group" under its row menu. */
+  DropdownMenuSub: ComponentType<Children>
+  DropdownMenuSubTrigger: ComponentType<Children & { className?: string; disabled?: boolean }>
+  DropdownMenuSubContent: ComponentType<Children & { className?: string }>
   HeightResizeHandle: ComponentType<{
     value: number
     min: number
@@ -422,6 +433,7 @@ export type PortalFeatures = {
 export type PortalToast = {
   success: (message: string) => void
   info: (message: string) => void
+  warning: (message: string) => void
   error: (message: string) => void
 }
 

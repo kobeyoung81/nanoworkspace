@@ -1,17 +1,30 @@
 // The host a panel borrows from the shell.
 //
-// The file browser is a shell component that moved into this module: it still
-// needs the shell's design system, its translations, its notifications and the
-// user's token. The shell sets them here for as long as the panel is mounted —
-// exactly one page is on screen at a time — so the components below keep their
-// original shape instead of threading a context through fifteen files.
+// The file browser, the git panel and the chat workbench are the shell's own code,
+// moved into this module: they still need the shell's design system, its
+// translations, its notifications, the user's token and the colour scheme. The
+// shell sets them here for as long as the plugin is mounted — exactly one page or
+// panel is on screen at a time — so the components keep their original shape
+// instead of threading a context through fifty files.
 
-import type { PageContext } from './contract'
+import type { PageContext, PortalFeatures, SessionSnapshot } from './contract'
 
+/**
+ * What the shell installs.
+ *
+ * The kit, strings and data client are what every moved component reads. The rest
+ * is optional because the two entry points differ: a page gets the route's query
+ * and the shell's features, a workbench panel gets neither (it has no route and
+ * asks the workbench, not the shell).
+ */
 export type Host = Pick<
   PageContext,
-  't' | 'locale' | 'token' | 'userId' | 'ui' | 'api' | 'toast' | 'navigate' | 'agentId'
->
+  't' | 'locale' | 'token' | 'userId' | 'theme' | 'ui' | 'api' | 'toast' | 'navigate' | 'agentId'
+> & {
+  session?: SessionSnapshot
+  query?: Record<string, string>
+  features?: PortalFeatures
+}
 
 let current: Host | null = null
 

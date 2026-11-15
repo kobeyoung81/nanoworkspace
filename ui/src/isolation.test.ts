@@ -22,9 +22,10 @@ describe('the boundary', () => {
   })
 
   it('declares the page in the manifest and exposes it under /plugins/workspace/', () => {
-    // The browser and the standalone viewer: the preview stack they share is this
-    // module's, so the tab that shows one file lives here too.
-    expect(manifest.pages.map((page) => page.path)).toEqual(['/files', '/files/view'])
+    // The browser and the standalone viewer share this module's preview stack, and
+    // the chat workbench is the third screen: it brings its own dock, so moving it
+    // here is what let the shell drop four thousand lines of its own.
+    expect(manifest.pages.map((page) => page.path)).toEqual(['/files', '/files/view', '/agent'])
     expect(manifest.entry).toBe('/plugins/workspace/remoteEntry.js')
     expect(remoteConfig).toContain("'./pages': './src/pages.tsx'")
     expect(remoteConfig).toContain("base: '/plugins/workspace/'")
