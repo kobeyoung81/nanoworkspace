@@ -186,8 +186,14 @@ export type PortalUIText = {
   >
   Input: ComponentType<{
     type?: string
+    id?: string
     value?: string
     placeholder?: string
+    'aria-label'?: string
+    spellCheck?: boolean | 'true' | 'false'
+    /** `numeric`, `decimal`, `email`, … — the keyboard hint a mobile browser reads. */
+    inputMode?: 'none' | 'text' | 'numeric' | 'decimal' | 'email' | 'tel' | 'search' | 'url'
+    step?: string
     className?: string
     disabled?: boolean
     required?: boolean
@@ -278,6 +284,7 @@ export type PortalUIText = {
     busy?: boolean
   }>
   Switch: ComponentType<{
+    id?: string
     checked?: boolean
     onCheckedChange?: (checked: boolean) => void
     disabled?: boolean
@@ -343,10 +350,14 @@ export type PortalUIText = {
   FilePanel: ComponentType<{ agentId: string; allowUpload?: boolean }>
   Textarea: ComponentType<{
     value?: string
+    id?: string
     rows?: number
     className?: string
     placeholder?: string
     readOnly?: boolean
+    disabled?: boolean
+    spellCheck?: boolean | 'true' | 'false'
+    'aria-label'?: string
     onChange?: (event: ChangeEvent<HTMLTextAreaElement>) => void
   }>
 }
@@ -372,6 +383,14 @@ export type PortalApi = {
 export type PortalFeatures = {
   /** Open the agent editor. With an id the shell loads that agent first. */
   openAgentForm: (request: { userId: string; agentId?: string; onSaved?: () => void }) => void
+  /**
+   * Drop the composer's cached voice settings.
+   *
+   * The console's dictation card and the composer read the same configuration; the
+   * card lives in another module now, so it asks the shell to forget what it cached
+   * instead of reaching into it.
+   */
+  refreshVoiceConfig: () => void
 }
 
 /** Transient feedback, in the shell's own notification style. */
