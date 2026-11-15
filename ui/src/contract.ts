@@ -190,6 +190,8 @@ export type PortalUIText = {
     placeholder?: string
     className?: string
     disabled?: boolean
+    required?: boolean
+    readOnly?: boolean
     autoComplete?: string
     onChange?: (event: ChangeEvent<HTMLInputElement>) => void
   }>
@@ -217,7 +219,7 @@ export type PortalUIText = {
   TableBody: ComponentType<Children & { className?: string }>
   TableRow: ComponentType<Children & { className?: string; onClick?: () => void }>
   TableHead: ComponentType<Children & { className?: string }>
-  TableCell: ComponentType<Children & { className?: string; label?: ReactNode }>
+  TableCell: ComponentType<Children & { className?: string; label?: ReactNode; title?: string }>
   Pagination: ComponentType<{
     page: number
     pageSize: number
@@ -283,6 +285,18 @@ export type PortalUIText = {
     'aria-label'?: string
     'aria-readonly'?: boolean
   }>
+  Tabs: ComponentType<
+    Children & {
+      /** Uncontrolled (the usual case) or controlled; the shell's tabs accept both. */
+      defaultValue?: string
+      value?: string
+      onValueChange?: (value: string) => void
+      className?: string
+    }
+  >
+  TabsList: ComponentType<Children & { className?: string }>
+  TabsTrigger: ComponentType<Children & { value: string; className?: string; disabled?: boolean }>
+  TabsContent: ComponentType<Children & { value: string; className?: string }>
   Separator: ComponentType<{ orientation?: 'horizontal' | 'vertical'; className?: string }>
   Spinner: ComponentType<{ label?: string; className?: string }>
   DropdownMenu: ComponentType<{
@@ -329,6 +343,7 @@ export type PortalUIText = {
   FilePanel: ComponentType<{ agentId: string; allowUpload?: boolean }>
   Textarea: ComponentType<{
     value?: string
+    rows?: number
     className?: string
     placeholder?: string
     readOnly?: boolean
