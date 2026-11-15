@@ -22,7 +22,9 @@ describe('the boundary', () => {
   })
 
   it('declares the page in the manifest and exposes it under /plugins/workspace/', () => {
-    expect(manifest.pages.map((page) => page.path)).toEqual(['/files'])
+    // The browser and the standalone viewer: the preview stack they share is this
+    // module's, so the tab that shows one file lives here too.
+    expect(manifest.pages.map((page) => page.path)).toEqual(['/files', '/files/view'])
     expect(manifest.entry).toBe('/plugins/workspace/remoteEntry.js')
     expect(remoteConfig).toContain("'./pages': './src/pages.tsx'")
     expect(remoteConfig).toContain("base: '/plugins/workspace/'")

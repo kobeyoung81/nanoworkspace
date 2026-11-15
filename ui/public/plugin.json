@@ -31,6 +31,19 @@
         "module": "workspace/pages",
         "export": "FilesPage"
       }
+    },
+    {
+      "id": "file-view",
+      "path": "/files/view",
+      "title": {
+        "zh-CN": "文件预览",
+        "en": "File preview"
+      },
+      "mount": {
+        "kind": "module",
+        "module": "workspace/pages",
+        "export": "FileViewerPage"
+      }
     }
   ],
   "provides": {

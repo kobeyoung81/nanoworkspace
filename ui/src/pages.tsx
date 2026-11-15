@@ -127,3 +127,5 @@ export function FilesPage({ ctx }: { ctx: PageContext }) {
 
 // The shell borrows this one: a page elsewhere embeds the workspace's browser.
 export { FilePanel } from './components/FilePanel'
+
+export { FileViewerPage } from './pages/FileViewerPage'

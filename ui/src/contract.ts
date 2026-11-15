@@ -85,6 +85,15 @@ export type PanelContribution = {
   mount: PanelMount
 }
 
+/** The parts of the stored session a page may read or patch. */
+export type SessionSnapshot = {
+  user_id: string
+  role?: string
+  display_name?: string
+  /** Set by an administrator's password reset; the shell forces the change page. */
+  must_change_password?: boolean
+}
+
 /**
  * What a panel gets from the shell. Every field is data the shell already owns:
  * a plugin never reaches into the shell's storage, router or theme.
@@ -92,6 +101,10 @@ export type PanelContribution = {
 export type PortalContext = {
   token: string
   userId: string
+  /** The signed-in account, as the shell stores it (empty user id on the login screen). */
+  session: SessionSnapshot
+  /** The route's query string, decoded (`?next=/agent` → `{ next: "/agent" }`). */
+  query: Record<string, string>
   locale: string
   theme: 'light' | 'dark'
   navigate: (path: string) => void
@@ -200,6 +213,8 @@ export type PortalUIText = {
     required?: boolean
     readOnly?: boolean
     autoComplete?: string
+    autoFocus?: boolean
+    minLength?: number
     onChange?: (event: ChangeEvent<HTMLInputElement>) => void
   }>
   Card: ComponentType<Children & { className?: string }>
@@ -372,7 +387,7 @@ export type PortalApi = {
   patch: <T>(path: string, body: unknown, base?: string) => Promise<T>
   del: <T>(path: string, base?: string) => Promise<T>
   /** Hosts of the platform APIs, so a page never spells a URL itself. */
-  bases: { portalConsole: string; admin: string; user: string; workspace: string }
+  bases: { portalConsole: string; admin: string; user: string; workspace: string; auth: string }
 }
 
 /**
@@ -393,6 +408,14 @@ export type PortalFeatures = {
    * instead of reaching into it.
    */
   refreshVoiceConfig: () => void
+  /**
+   * Store a freshly issued session. The shell owns the storage (and the rule that
+   * another account signing in on this browser drops the previous one's caches), so
+   * the login and registration pages ask it to sign in rather than writing it.
+   */
+  signIn: (session: SessionSnapshot) => void
+  /** Patch the stored session (the forced password change clears its flag here). */
+  patchSession: (patch: Partial<SessionSnapshot>) => void
 }
 
 /** Transient feedback, in the shell's own notification style. */
