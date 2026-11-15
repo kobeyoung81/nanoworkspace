@@ -187,7 +187,8 @@ export type PortalUIText = {
   Input: ComponentType<{
     type?: string
     id?: string
-    value?: string
+    /** React accepts a number for a controlled input; the field renders it as text. */
+    value?: string | number
     placeholder?: string
     'aria-label'?: string
     spellCheck?: boolean | 'true' | 'false'
@@ -298,6 +299,7 @@ export type PortalUIText = {
       defaultValue?: string
       value?: string
       onValueChange?: (value: string) => void
+      orientation?: 'horizontal' | 'vertical'
       className?: string
     }
   >
