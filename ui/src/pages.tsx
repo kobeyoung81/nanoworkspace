@@ -14,6 +14,7 @@ import { setHost } from './host'
 import { useApi } from './useApi'
 import { FilePanel } from './components/FilePanel'
 import { AgentPage as ChatPage } from './agent/pages/AgentPage'
+import { FileViewerPage as ViewerPage } from './pages/FileViewerPage'
 
 /** The agent the URL asks for (`?agent=`), read once at mount. */
 function agentFromLocation(): string | null {
@@ -132,7 +133,17 @@ export function FilesPage({ ctx }: { ctx: PageContext }) {
 // The shell borrows this one: a page elsewhere embeds the workspace's browser.
 export { FilePanel } from './components/FilePanel'
 
-export { FileViewerPage } from './pages/FileViewerPage'
+/**
+ * The standalone preview.
+ *
+ * It reads the host (strings, token, API) on every render, so the wrapper installs
+ * the page's context before it mounts — without it the viewer throws "rendered
+ * without a host" the moment a tab opens `/files/view`.
+ */
+export function FileViewerPage({ ctx }: { ctx: PageContext }) {
+  setHost(ctx)
+  return <ViewerPage />
+}
 
 /**
  * The chat workbench.
