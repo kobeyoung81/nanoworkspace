@@ -9,7 +9,7 @@
         "zh-CN": "Git",
         "en": "Git"
       },
-      "icon": "folder",
+      "icon": "git-branch",
       "slot": "right",
       "mount": {
         "kind": "module",

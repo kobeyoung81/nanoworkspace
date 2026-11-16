@@ -1,5 +1,5 @@
 import { lazy, Suspense, memo, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type FormEvent, type KeyboardEvent, type MouseEvent as ReactMouseEvent } from 'react'
-import { AlertTriangle, ArrowDown, Bot, Brain, Brush, CheckCircle2, ChevronDown, Circle, Command, Cpu, FolderOpen, FolderPlus, FolderTree, HelpCircle, ImagePlus, Lightbulb, Loader2, MessageSquare, MessageSquarePlus, Mic, Minimize2, MoreHorizontal, Paperclip, Plus, RefreshCw, Send, Settings, Sparkles, Square, SquareTerminal, Trash2, Wrench, X, XCircle, Zap } from 'lucide-react'
+import { AlertTriangle, ArrowDown, Bot, Brain, Brush, CheckCircle2, ChevronDown, Circle, Command, Cpu, FolderOpen, FolderPlus, GitBranch, HelpCircle, ImagePlus, Lightbulb, Loader2, MessageSquare, MessageSquarePlus, Mic, Minimize2, MoreHorizontal, Paperclip, Plus, RefreshCw, Send, Settings, Sparkles, Square, SquareTerminal, Trash2, Wrench, X, XCircle, Zap } from 'lucide-react'
 import { Navigate, useNavigate, useSearchParams } from '../router'
 import { toast } from '../lib/toast'
 import { portalApi } from '../portal/api'
@@ -32,6 +32,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '../components/ui/toolti
 import { Panel, PanelGroup, PanelResizeHandle } from '../components/ui/resizable'
 import { Workbench } from '../workbench/Workbench'
 import { GitBrowserPanel } from '../../components/git/GitBrowserPanel'
+import { buildPanelSet } from '../workbench/panelSet'
 import { getHost, setHost } from '../../host'
 import { usePlugins } from '../portal/registry'
 import { useTheme } from '../lib/theme'
@@ -1213,7 +1214,17 @@ function SignedInAgent({ userId }: { userId: string }) {
 
   // Panels come from plugins.json: the shell's own six through the static map,
   // a plugin from another application through its manifest + remote entry.
-  const { plugins: workbenchPlugins } = usePlugins(PANEL_MODULES, PANEL_ORDER)
+  // This module's panels plus the ones other plugins contribute (the artifact
+  // library and document panels): the shell resolves those and hands them over
+  // in the page context, because this screen cannot read its registry.
+  // Rebuilt when the shell's list changes: the manifests resolve after this
+  // page mounts, so the first render legitimately has none.
+  const remotePanels = getHost().remotePanels
+  const panelSet = useMemo(
+    () => buildPanelSet(PANEL_MODULES, PANEL_ORDER, remotePanels),
+    [remotePanels],
+  )
+  const { plugins: workbenchPlugins } = usePlugins(panelSet.modules, panelSet.order)
   const { i18n: workbenchI18n } = useTranslation()
   const { resolvedTheme } = useTheme()
   const routerNavigate = useNavigate()
@@ -2494,7 +2505,7 @@ const PANEL_MODULES: Record<string, WorkbenchPlugin> = {
   'user-config': { id: 'user-config', icon: Settings, titleKey: 'nav.userConfig', defaultSlot: 'center', Component: memo(UserConfigPanel) },
   // The git browser is this module's own panel (it lives in components/git); it
   // joins the workbench so the whole agent screen is one application.
-  git: { id: 'git', icon: FolderTree, titleKey: 'workbench.panel.gitBrowser', defaultSlot: 'right', Component: memo(GitPanel) },
+  git: { id: 'git', icon: GitBranch, titleKey: 'workbench.panel.gitBrowser', defaultSlot: 'right', Component: memo(GitPanel) },
 }
 
 const SUGGESTION_KEYS = ['agent.suggestion1', 'agent.suggestion2', 'agent.suggestion3']

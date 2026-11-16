@@ -54,6 +54,7 @@ export const PANEL_ICONS = [
   'cpu',
   'key-round',
   'layout-dashboard',
+  'git-branch',
   'message-square',
   'mic',
   'scroll-text',
@@ -437,6 +438,24 @@ export type PortalToast = {
   error: (message: string) => void
 }
 
+/**
+ * A workbench panel another plugin contributes, resolved by the shell.
+ *
+ * A page that hosts the workbench (the workspace's chat screen) cannot read the
+ * shell's registry, so the shell hands the panels over as data: an id, the title
+ * it already localized, the icon component, where a fresh layout puts it, and a
+ * component that renders it. The component arrives as a reference — the same way
+ * `ui.FilePanel` does — because a remote cannot be described by props.
+ */
+export type WorkbenchPanelContribution = {
+  id: string
+  title: string
+  icon: ComponentType<{ className?: string }>
+  defaultSlot: 'left' | 'center' | 'right' | 'bottom'
+  /** Renders the remote panel; it receives the workbench's panel context. */
+  Component: ComponentType<{ ctx?: PanelContext }>
+}
+
 /** What a page gets: the panel context plus the shell's kit, strings and data client. */
 export type PageContext = PortalContext & {
   t: (key: string, options?: Record<string, unknown>) => string
@@ -448,6 +467,13 @@ export type PageContext = PortalContext & {
   api: PortalApi
   features: PortalFeatures
   toast: PortalToast
+  /**
+   * Panels remote plugins contribute to the workbench this page hosts.
+   *
+   * Empty for a page that hosts no workbench. The shell resolves them (manifest →
+   * module federation) so the page never has to know a plugin exists.
+   */
+  remotePanels: WorkbenchPanelContribution[]
 }
 
 /** A page component, as exported by a `module` mount. */

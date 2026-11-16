@@ -7,7 +7,7 @@
 // panel is on screen at a time — so the components keep their original shape
 // instead of threading a context through fifty files.
 
-import type { PageContext, PortalFeatures, SessionSnapshot } from './contract'
+import type { PageContext, PortalFeatures, SessionSnapshot, WorkbenchPanelContribution } from './contract'
 
 /**
  * What the shell installs.
@@ -24,6 +24,14 @@ export type Host = Pick<
   session?: SessionSnapshot
   query?: Record<string, string>
   features?: PortalFeatures
+  /**
+   * Panels other plugins contribute to the workbench this page hosts.
+   *
+   * The shell resolves them from the plugin manifests; a page that hosts a
+   * workbench appends them instead of asking the registry itself (it cannot —
+   * the registry is the shell's source).
+   */
+  remotePanels?: WorkbenchPanelContribution[]
 }
 
 let current: Host | null = null
