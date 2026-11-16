@@ -984,11 +984,20 @@ export function useAgent(
       if (reconnectTimer !== null) {
         window.clearTimeout(reconnectTimer)
       }
-      if (ws) {
-        ws.onclose = null
-        ws.onerror = null
-        ws.onmessage = null
-        ws.close()
+      // A local copy: `ws` is reassigned by connect(), so TypeScript cannot keep
+      // it narrowed inside the closure below.
+      const socket = ws
+      if (socket) {
+        socket.onclose = null
+        socket.onerror = null
+        socket.onmessage = null
+        // Closing during the handshake is the one case the browser reports as
+        // "closed before the connection is established"; let it open, then close.
+        if (socket.readyState === WebSocket.CONNECTING) {
+          socket.onopen = () => socket.close()
+        } else {
+          socket.close()
+        }
         wsRef.current = null
       }
     }

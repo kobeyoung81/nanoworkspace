@@ -185,7 +185,13 @@ export function useRealtimeVoice(options: UseRealtimeVoiceOptions): VoiceRecorde
       ws.onclose = null
       ws.onerror = null
       ws.onmessage = null
-      ws.close()
+      if (ws.readyState === WebSocket.CONNECTING) {
+        // Same reason as the terminal: a close during the handshake is logged as
+        // an error by the browser.
+        ws.onopen = () => ws.close()
+      } else {
+        ws.close()
+      }
     }
   }, [])
 

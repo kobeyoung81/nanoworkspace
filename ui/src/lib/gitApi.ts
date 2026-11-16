@@ -432,20 +432,29 @@ export async function stashAction(
 }
 
 // ---- Shortcuts (server-side favorites) ----
+//
+// The favourites belong to the portal (they are the user's rows in the console),
+// not to this module: `/api/user/v1/me/shortcuts`. Calling them on the workspace
+// base answered 404 and took the whole git panel down with it.
+
+/** The portal's user API, where the shortcuts live. */
+function portalUserBase(): string {
+  return getHost().api.bases.user
+}
 
 export async function fetchShortcuts(agentId: string): Promise<GitShortcut[]> {
   const data = await getJson<{ shortcuts: GitShortcut[] }>(
-    `${workspaceBase()}/me/shortcuts?agentID=${encodeURIComponent(agentId)}`,
+    `${portalUserBase()}/me/shortcuts?agentID=${encodeURIComponent(agentId)}`,
   )
   return data.shortcuts ?? []
 }
 
 export async function addShortcut(agentId: string, path: string, label?: string): Promise<GitShortcut> {
-  return sendJson('POST', `${workspaceBase()}/me/shortcuts`, { agent_id: agentId, path, label })
+  return sendJson('POST', `${portalUserBase()}/me/shortcuts`, { agent_id: agentId, path, label })
 }
 
 export async function deleteShortcut(id: number): Promise<void> {
-  await sendJson('DELETE', `${workspaceBase()}/me/shortcuts/${id}`, undefined)
+  await sendJson('DELETE', `${portalUserBase()}/me/shortcuts/${id}`, undefined)
 }
 
 // ---- Git marker helpers (VS Code conventions) ----

@@ -23,6 +23,11 @@ export default defineConfig({
       shared: {
         react: { singleton: true, import: false },
         'react-dom': { singleton: true, import: false },
+        // The shell installs the translator (`initReactI18next` runs there); a
+        // bundled copy would be a second, uninitialised instance and every
+        // `useTranslation()` would return raw keys.
+        i18next: { singleton: true, import: false },
+        'react-i18next': { singleton: true, import: false },
       },
     }),
   ],

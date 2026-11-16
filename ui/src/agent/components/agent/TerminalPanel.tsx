@@ -461,7 +461,14 @@ export function TerminalPanel() {
       wsRef.current = null
       if (ws) {
         ws.onclose = null
-        ws.close()
+        // Closing a socket that is still CONNECTING makes the browser log
+        // "WebSocket is closed before the connection is established"; wait for
+        // the handshake and close right after it instead.
+        if (ws.readyState === WebSocket.CONNECTING) {
+          ws.onopen = () => ws.close()
+        } else {
+          ws.close()
+        }
       }
     }
   }, [agentId, token, bindAll, resizeAll, setData, cancelResizeTimer])

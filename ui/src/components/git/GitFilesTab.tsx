@@ -82,7 +82,17 @@ export function GitFilesTab({ agentId, path, onPathChange, refreshKey }: GitFile
       return
     }
     try {
-      const [home, stored] = await Promise.all([fetchGitInfo(agentId), fetchShortcuts(agentId)])
+      // The git facts are required; the favourites are a convenience. Fetching
+      // them together used to make a failing shortcut service (a 404 on a
+      // backend that does not serve /me/shortcuts) report the whole panel as
+      // broken, which is what "request failed (404)" was.
+      const home = await fetchGitInfo(agentId)
+      let stored: GitShortcut[] = []
+      try {
+        stored = await fetchShortcuts(agentId)
+      } catch {
+        stored = []
+      }
       setInfo(home)
       // The agent's home is a default favourite: it is where the browser opens,
       // and one click gets back there. It is added once per agent, so a user who
