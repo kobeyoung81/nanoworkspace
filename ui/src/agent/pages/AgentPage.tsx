@@ -2,8 +2,6 @@ import { lazy, Suspense, memo, useCallback, useEffect, useMemo, useRef, useState
 import { AlertTriangle, ArrowDown, Bot, Brain, Brush, CheckCircle2, ChevronDown, Circle, Command, Cpu, FolderOpen, FolderPlus, GitBranch, HelpCircle, ImagePlus, Lightbulb, Loader2, MessageSquare, MessageSquarePlus, Mic, Minimize2, MoreHorizontal, Paperclip, Plus, RefreshCw, Send, Settings, Sparkles, Square, SquareTerminal, Trash2, Wrench, X, XCircle, Zap } from 'lucide-react'
 import { Navigate, useNavigate, useSearchParams } from '../router'
 import { toast } from '../lib/toast'
-import { portalApi } from '../portal/api'
-import { portalUI } from '../portal/ui'
 import { useTranslation } from 'react-i18next'
 import { Card } from '../components/ui/card'
 import { Button } from '../components/ui/button'
@@ -1236,6 +1234,8 @@ function SignedInAgent({ userId }: { userId: string }) {
     (key: string, options?: Record<string, unknown>) => workbenchI18n.t(key, options),
     [workbenchI18n],
   )
+  const hostUI = getHost().ui
+  const hostAPI = getHost().api
   const panelContext = useMemo(
     () => ({
       token: accessToken,
@@ -1247,11 +1247,15 @@ function SignedInAgent({ userId }: { userId: string }) {
       navigate: (path: string) => routerNavigate(path),
       agentId: selectedAgent ?? undefined,
       t: panelTranslate,
-      ui: portalUI,
-      api: portalApi,
+      // The real implementations, not this module's forwarding proxies: a panel
+      // that installs the context it was given (the workspace's own manifest
+      // panel does) must end up with objects that terminate, not with proxies
+      // that call back into whatever is installed.
+      ui: hostUI,
+      api: hostAPI,
       toast: { success: toast.success, info: toast.info, warning: toast.warning, error: toast.error },
     }),
-    [accessToken, userId, workbenchI18n.language, resolvedTheme, routerNavigate, selectedAgent, panelTranslate],
+    [accessToken, userId, workbenchI18n.language, resolvedTheme, routerNavigate, selectedAgent, panelTranslate, hostUI, hostAPI],
   )
 
 const workbenchValue = useMemo<AgentWorkbench>(

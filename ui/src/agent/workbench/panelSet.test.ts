@@ -46,3 +46,15 @@ describe('buildPanelSet', () => {
     expect(order).toEqual(['chat'])
   })
 })
+
+describe('buildPanelSet and this application’s own manifest', () => {
+  it('ignores the panels of its own plugin', () => {
+    // The shell resolves every manifest, including this one; mounting the
+    // manifest's git panel alongside the built-in one ran a second copy that
+    // installed its own context mid-render (an infinite getter recursion).
+    const { order } = buildPanelSet({ chat: plugin('chat') }, ['chat'], [
+      { id: 'workspace.git', title: 'Git', icon: () => null, defaultSlot: 'right', Component: () => null },
+    ])
+    expect(order).toEqual(['chat'])
+  })
+})

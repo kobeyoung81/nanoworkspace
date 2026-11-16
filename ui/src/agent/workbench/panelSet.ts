@@ -30,12 +30,18 @@ function extraPanels(contributed: WorkbenchPanelContribution[]): WorkbenchPlugin
   }))
 }
 
+/** The plugin id this application publishes under (see public/plugin.json). */
+const OWN_PLUGIN_ID = 'workspace'
+
 /**
  * buildPanelSet merges the declared panels with the contributed ones.
  *
  * `order` is this module's manifest order; a contributed panel whose id already
  * exists here is ignored (one id, one owner — the shell's own rule), so a remote
- * cannot shadow the agents list or the composer.
+ * cannot shadow the agents list or the composer. This application's own manifest
+ * panels are ignored too: the workbench already renders them, and mounting the
+ * manifest copy as well made it install its own panel context in the middle of a
+ * render (the recursion that crashed the page).
  */
 export function buildPanelSet(
   internal: Record<string, WorkbenchPlugin>,
@@ -52,7 +58,7 @@ export function buildPanelSet(
     }
   }
   for (const plugin of extraPanels(contributed ?? [])) {
-    if (modules[plugin.id]) {
+    if (modules[plugin.id] || plugin.id.startsWith(`${OWN_PLUGIN_ID}.`)) {
       continue
     }
     modules[plugin.id] = plugin
