@@ -3,7 +3,7 @@ module gitee.com/kobeyoung81/nanoworkspace
 go 1.25.0
 
 require (
-	gitee.com/kobeyoung81/nanoprotocol v0.46.0
+	gitee.com/kobeyoung81/nanoprotocol v0.47.0
 	github.com/golang-jwt/jwt/v5 v5.2.1
 )
 
