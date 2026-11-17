@@ -55,7 +55,7 @@ func New(addr string, jwt *auth.Validator, ag *agents.Client, tn *tunnel.Client,
 	s := &Server{jwt: jwt, agents: ag, tunnels: tn}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+		writeJSON(w, http.StatusOK, map[string]string{"status": "ok", "version": Version})
 	})
 	// Operational numbers, anonymous; isPublicPath keeps it out of the token check.
 	mux.Handle("GET /metrics", metrics.Handler())
