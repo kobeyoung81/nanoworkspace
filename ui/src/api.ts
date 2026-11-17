@@ -47,10 +47,24 @@ async function contentResponse(agentID: string, path: string, init?: RequestInit
   })
 }
 
+// errorMessage prefers the server's explanation: a size limit or a container
+// that needs a restart is actionable, "download failed (502)" is not.
+async function errorMessage(response: Response, action: string): Promise<Error> {
+  try {
+    const payload = (await response.json()) as { error?: unknown }
+    if (payload && typeof payload.error === 'string' && payload.error) {
+      return new Error(payload.error)
+    }
+  } catch {
+    // Not a JSON answer: fall back to the status.
+  }
+  return new Error(`${action} (${response.status})`)
+}
+
 export async function downloadFile(agentID: string, path: string): Promise<Blob> {
   const response = await contentResponse(agentID, path)
   if (!response.ok) {
-    throw new Error(`download failed (${response.status})`)
+    throw await errorMessage(response, 'download failed')
   }
   return response.blob()
 }
@@ -62,7 +76,7 @@ export async function readTextFile(agentID: string, path: string): Promise<strin
     return null
   }
   if (!response.ok) {
-    throw new Error(`read failed (${response.status})`)
+    throw await errorMessage(response, 'read failed')
   }
   return response.text()
 }
@@ -74,7 +88,7 @@ export async function uploadFile(agentID: string, path: string, body: Blob): Pro
     body,
   })
   if (!response.ok) {
-    throw new Error(`upload failed (${response.status})`)
+    throw await errorMessage(response, 'upload failed')
   }
 }
 

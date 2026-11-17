@@ -7,15 +7,15 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
-	"errors"
 	"io"
 	"log/slog"
 	"net/http"
 	"net/url"
+	"os"
+	"strconv"
 	"strings"
 	"time"
 
-	"gitee.com/kobeyoung81/nanoprotocol"
 	"gitee.com/kobeyoung81/nanoworkspace/internal/agents"
 	"gitee.com/kobeyoung81/nanoworkspace/internal/auth"
 	"gitee.com/kobeyoung81/nanoworkspace/internal/metrics"
@@ -37,9 +37,20 @@ func hypervisorPath(p string) string {
 	return "/api/v1" + p
 }
 
-// maxFileBytes mirrors the hypervisor's 10 MiB limit and the portal's old cap:
-// buffering more than the other end accepts only wastes memory.
-const maxFileBytes = 10 << 20
+// defaultMaxFileBytes caps one uploaded file. It is an application limit, not a
+// transport one: the tunnel carries chunks, so raising this (or setting
+// NANOSEC_WORKSPACE_MAX_FILE_BYTES) is the whole change needed for bigger files.
+const defaultMaxFileBytes int64 = 2 << 30
+
+// loadMaxFileBytes reads the upload cap from the environment.
+func loadMaxFileBytes() int64 {
+	if raw := strings.TrimSpace(os.Getenv("NANOSEC_WORKSPACE_MAX_FILE_BYTES")); raw != "" {
+		if n, err := strconv.ParseInt(raw, 10, 64); err == nil && n > 0 {
+			return n
+		}
+	}
+	return defaultMaxFileBytes
+}
 
 // Server is the HTTP surface.
 type Server struct {
@@ -47,12 +58,14 @@ type Server struct {
 	agents  *agents.Client
 	tunnels *tunnel.Client
 	srv     *http.Server
+	// MaxFileBytes is the upload cap; the caller may lower or raise it.
+	MaxFileBytes int64
 }
 
 // New builds the server. uiDir optionally carries this module's front end (see
 // plugin_files.go); an empty directory just means "no page from this module".
 func New(addr string, jwt *auth.Validator, ag *agents.Client, tn *tunnel.Client, uiDir string) *Server {
-	s := &Server{jwt: jwt, agents: ag, tunnels: tn}
+	s := &Server{jwt: jwt, agents: ag, tunnels: tn, MaxFileBytes: loadMaxFileBytes()}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]string{"status": "ok", "version": Version})
@@ -159,7 +172,7 @@ func (s *Server) handleList(w http.ResponseWriter, r *http.Request) {
 	if q := r.URL.Query().Get("path"); q != "" {
 		path += "?path=" + url.QueryEscape(q)
 	}
-	s.forward(w, r, owner, http.MethodGet, path, nil)
+	s.forward(w, r, owner, http.MethodGet, path, nil, 0)
 }
 
 func (s *Server) handleContentGET(w http.ResponseWriter, r *http.Request) {
@@ -172,7 +185,7 @@ func (s *Server) handleContentGET(w http.ResponseWriter, r *http.Request) {
 	if q := r.URL.Query().Get("path"); q != "" {
 		path += "?path=" + url.QueryEscape(q)
 	}
-	s.forward(w, r, owner, http.MethodGet, path, nil)
+	s.forward(w, r, owner, http.MethodGet, path, nil, 0)
 }
 
 // handleContentPUT uploads a file. Only the owner may write.
@@ -182,15 +195,11 @@ func (s *Server) handleContentPUT(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	body, ok := s.readLimitedBody(w, r)
-	if !ok {
-		return
-	}
 	path := "/api/v1/files/" + url.PathEscape(agentID) + "/content"
 	if q := r.URL.Query().Get("path"); q != "" {
 		path += "?path=" + url.QueryEscape(q)
 	}
-	s.forward(w, r, owner, http.MethodPut, path, body)
+	s.forward(w, r, owner, http.MethodPut, path, r.Body, r.ContentLength)
 }
 
 func (s *Server) handleContentDELETE(w http.ResponseWriter, r *http.Request) {
@@ -203,7 +212,7 @@ func (s *Server) handleContentDELETE(w http.ResponseWriter, r *http.Request) {
 	if q := r.URL.Query().Get("path"); q != "" {
 		path += "?path=" + url.QueryEscape(q)
 	}
-	s.forward(w, r, owner, http.MethodDelete, path, nil)
+	s.forward(w, r, owner, http.MethodDelete, path, nil, 0)
 }
 
 func (s *Server) handleMkdir(w http.ResponseWriter, r *http.Request) {
@@ -216,7 +225,7 @@ func (s *Server) handleMkdir(w http.ResponseWriter, r *http.Request) {
 	if q := r.URL.Query().Get("path"); q != "" {
 		path += "?path=" + url.QueryEscape(q)
 	}
-	s.forward(w, r, owner, http.MethodPost, path, nil)
+	s.forward(w, r, owner, http.MethodPost, path, nil, 0)
 }
 
 func (s *Server) handleRename(w http.ResponseWriter, r *http.Request) {
@@ -245,7 +254,7 @@ func (s *Server) forwardPathPair(w http.ResponseWriter, r *http.Request, op stri
 	if encoded := query.Encode(); encoded != "" {
 		path += "?" + encoded
 	}
-	s.forward(w, r, owner, http.MethodPost, path, nil)
+	s.forward(w, r, owner, http.MethodPost, path, nil, 0)
 }
 
 // handleGit forwards any git-panel request verbatim: the hypervisor's git API
@@ -266,61 +275,62 @@ func (s *Server) handleGit(w http.ResponseWriter, r *http.Request) {
 	if q := r.URL.RawQuery; q != "" {
 		path += "?" + q
 	}
-	body, ok := s.readLimitedBody(w, r)
-	if !ok {
+	s.forward(w, r, owner, r.Method, path, r.Body, r.ContentLength)
+}
+
+// forward puts the request on the container's tunnel and copies the answer
+// back. Both directions stream: the request body is handed to the tunnel as the
+// browser sends it, and the answer is copied as it arrives, so a large file
+// never sits in this process.
+func (s *Server) forward(w http.ResponseWriter, r *http.Request, owner, method, path string, body io.Reader, contentLength int64) {
+	if contentLength > 0 && contentLength > s.MaxFileBytes {
+		writeJSON(w, http.StatusRequestEntityTooLarge, map[string]string{"error": "file exceeds max size"})
 		return
 	}
-	s.forward(w, r, owner, r.Method, path, body)
-}
-
-// readLimitedBody buffers at most maxFileBytes; anything larger is refused
-// before it reaches a container.
-func (s *Server) readLimitedBody(w http.ResponseWriter, r *http.Request) ([]byte, bool) {
-	body, err := io.ReadAll(io.LimitReader(r.Body, maxFileBytes+1))
+	resp, err := s.tunnels.DoStream(r.Context(), owner, method, path, r.Header, body, contentLength)
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "failed to read request body"})
-		return nil, false
-	}
-	if len(body) > maxFileBytes {
-		writeJSON(w, http.StatusRequestEntityTooLarge, map[string]string{"error": "file exceeds max size"})
-		return nil, false
-	}
-	return body, true
-}
-
-// forward puts the request on the container's tunnel and mirrors the answer.
-func (s *Server) forward(w http.ResponseWriter, r *http.Request, owner, method, path string, body []byte) {
-	req := nanoprotocol.TunnelRequest{
-		RequestID: newRequestID(),
-		Method:    method,
-		Path:      path,
-		Body:      body,
-	}
-	if contentType := r.Header.Get("Content-Type"); contentType != "" && len(body) > 0 {
-		req.Headers = map[string][]string{"Content-Type": {contentType}}
-	}
-
-	resp, err := s.tunnels.Do(r.Context(), owner, req)
-	if err != nil {
-		if errors.Is(err, tunnel.ErrOffline) {
-			writeJSON(w, http.StatusBadGateway, map[string]string{"error": "the agent container is not reachable"})
-			return
-		}
 		slog.Warn("forward to the agent failed", "agent_owner", owner, "path", path, "error", err)
 		writeJSON(w, http.StatusBadGateway, map[string]string{"error": "forward to the agent failed"})
 		return
 	}
+	defer func() { _ = resp.Body.Close() }()
 
-	for key, values := range resp.Headers {
-		if strings.EqualFold(key, "Content-Length") || strings.EqualFold(key, "Transfer-Encoding") {
+	// The relay marks its own failures, so a 404 from the container (a missing
+	// file) keeps its meaning while "no tunnel here" does not.
+	switch resp.Header.Get(tunnel.RelayErrorHeader) {
+	case "":
+	case "offline":
+		writeJSON(w, http.StatusBadGateway, map[string]string{"error": "the agent container is not reachable"})
+		return
+	case "busy":
+		writeJSON(w, http.StatusTooManyRequests, map[string]string{"error": "the agent container is busy; retry shortly"})
+		return
+	case "too_large":
+		writeJSON(w, http.StatusRequestEntityTooLarge, map[string]string{"error": "this agent's container predates large-file transfer; restart it and retry"})
+		return
+	default:
+		writeJSON(w, http.StatusBadGateway, map[string]string{"error": "forward to the agent failed"})
+		return
+	}
+
+	copyResponseHeaders(w.Header(), resp.Header)
+	w.WriteHeader(resp.StatusCode)
+	_, _ = io.Copy(w, resp.Body)
+}
+
+// copyResponseHeaders forwards end-to-end headers, including Content-Length and
+// Content-Range: the browser needs them for progress and for range requests.
+func copyResponseHeaders(dst http.Header, src http.Header) {
+	for key, values := range src {
+		switch http.CanonicalHeaderKey(key) {
+		case "Connection", "Keep-Alive", "Proxy-Authenticate", "Proxy-Authorization",
+			"Te", "Trailer", "Transfer-Encoding", "Upgrade", tunnel.RelayErrorHeader:
 			continue
 		}
 		for _, value := range values {
-			w.Header().Add(key, value)
+			dst.Add(key, value)
 		}
 	}
-	w.WriteHeader(resp.Status)
-	_, _ = w.Write(resp.Body)
 }
 
 func writeJSON(w http.ResponseWriter, status int, body any) {

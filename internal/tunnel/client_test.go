@@ -7,8 +7,10 @@ package tunnel
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"testing"
 
 	"gitee.com/kobeyoung81/nanoprotocol"
@@ -70,5 +72,50 @@ func TestARealFailureIsNotRetried(t *testing.T) {
 	}
 	if asked != 1 {
 		t.Fatalf("the bus was retried after a real failure (%d calls)", asked)
+	}
+}
+
+// TestDoStreamForwardsHeadersAndQuery: the streamed path carries the method and
+// the target path in the query, and passes the caller's headers (Range included)
+// to the relay. A download must be resumable and a preview seekable.
+func TestDoStreamForwardsHeadersAndQuery(t *testing.T) {
+	var gotQuery url.Values
+	var gotHeader http.Header
+	var gotBody []byte
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotQuery = r.URL.Query()
+		gotHeader = r.Header.Clone()
+		gotBody, _ = io.ReadAll(r.Body)
+		w.Header().Set("Content-Range", "bytes 0-3/4")
+		w.WriteHeader(http.StatusPartialContent)
+		_, _ = w.Write([]byte("data"))
+	}))
+	defer srv.Close()
+
+	c := New(srv.URL, "", "tok")
+	resp, err := c.DoStream(context.Background(), "user-1", http.MethodGet,
+		"/api/v1/files/a/content?path=big.mp4", http.Header{"Range": {"bytes=0-3"}}, nil, 0)
+	if err != nil {
+		t.Fatalf("DoStream: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if gotQuery.Get("method") != http.MethodGet || gotQuery.Get("path") != "/api/v1/files/a/content?path=big.mp4" {
+		t.Fatalf("query = %v", gotQuery)
+	}
+	if gotHeader.Get("Range") != "bytes=0-3" {
+		t.Fatalf("Range = %q", gotHeader.Get("Range"))
+	}
+	if gotHeader.Get("Authorization") != "Bearer tok" {
+		t.Fatalf("Authorization = %q", gotHeader.Get("Authorization"))
+	}
+	if len(gotBody) != 0 {
+		t.Fatalf("body = %q, want empty", gotBody)
+	}
+	if resp.StatusCode != http.StatusPartialContent {
+		t.Fatalf("status = %d, want 206", resp.StatusCode)
+	}
+	if got := resp.Header.Get("Content-Range"); got != "bytes 0-3/4" {
+		t.Fatalf("Content-Range = %q", got)
 	}
 }

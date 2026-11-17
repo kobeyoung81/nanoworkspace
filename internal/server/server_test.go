@@ -10,6 +10,7 @@ import (
 	"crypto/rsa"
 	"encoding/base64"
 	"encoding/json"
+	"io"
 	"math/big"
 	"net/http"
 	"net/http/httptest"
@@ -68,7 +69,22 @@ func testServer(t *testing.T, tunnelStatus int, tunnelBody string) (*httptest.Se
 	var seen []nanoprotocol.TunnelRequest
 	tunnelSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if tunnelStatus == http.StatusNotFound {
-			http.NotFound(w, r)
+			// The provisioner marks its own failures; a container 404 must keep
+			// its meaning.
+			w.Header().Set(tunnel.RelayErrorHeader, "offline")
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		if strings.HasSuffix(r.URL.Path, "/proxy") {
+			body, _ := io.ReadAll(r.Body)
+			seen = append(seen, nanoprotocol.TunnelRequest{
+				Method: r.URL.Query().Get("method"),
+				Path:   r.URL.Query().Get("path"),
+				Body:   body,
+			})
+			w.Header().Set("Content-Type", "text/plain")
+			w.WriteHeader(tunnelStatus)
+			_, _ = w.Write([]byte(tunnelBody))
 			return
 		}
 		var req nanoprotocol.TunnelRequest
@@ -200,10 +216,13 @@ func TestOfflineContainerIs502(t *testing.T) {
 }
 
 func TestUploadLimitIsEnforced(t *testing.T) {
+	// Shrink the cap instead of allocating it: the rule is about the declared
+	// length, not about the default being small.
+	t.Setenv("NANOSEC_WORKSPACE_MAX_FILE_BYTES", "16")
 	srv, key, seen := testServer(t, http.StatusOK, `{}`)
 	token := mintToken(t, key, "alice", auth.RoleUser)
 
-	big := strings.Repeat("x", maxFileBytes+1)
+	big := strings.Repeat("x", 32)
 	if got := do(t, srv, http.MethodPut, "/api/user/v1/files/agent-1/content?path=big", token, big).StatusCode; got != http.StatusRequestEntityTooLarge {
 		t.Fatalf("status = %d, want 413", got)
 	}
@@ -237,5 +256,37 @@ func TestCanonicalWorkspacePrefixServesTheSameSurface(t *testing.T) {
 	}
 	if got := do(t, srv, http.MethodGet, "/api/v1/workspace/files/agent-1", "", "").StatusCode; got != http.StatusUnauthorized {
 		t.Fatalf("canonical prefix without a token: status = %d, want 401", got)
+	}
+}
+
+// TestLargeDownloadIsCopiedThrough is the regression for the reported bug: a
+// body far beyond one tunnel frame must reach the browser whole, not as a 502.
+func TestLargeDownloadIsCopiedThrough(t *testing.T) {
+	payload := strings.Repeat("z", 900<<10)
+	srv, key, _ := testServer(t, http.StatusOK, payload)
+	token := mintToken(t, key, "alice", auth.RoleUser)
+
+	resp := do(t, srv, http.MethodGet, "/api/user/v1/files/agent-1/content?path=big.mp4", token, "")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	got, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("read body: %v", err)
+	}
+	if len(got) != len(payload) {
+		t.Fatalf("body = %d bytes, want %d", len(got), len(payload))
+	}
+}
+
+// TestRelayFailureKeepsItsMeaning: the provisioner marks its own failures, so a
+// "no tunnel here" answer must not look like the container's 404.
+func TestRelayFailureKeepsItsMeaning(t *testing.T) {
+	srv, key, _ := testServer(t, http.StatusNotFound, "")
+	token := mintToken(t, key, "alice", auth.RoleUser)
+
+	resp := do(t, srv, http.MethodGet, "/api/user/v1/files/agent-1/content?path=notes", token, "")
+	if resp.StatusCode != http.StatusBadGateway {
+		t.Fatalf("status = %d, want 502", resp.StatusCode)
 	}
 }
