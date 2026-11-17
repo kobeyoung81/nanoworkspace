@@ -1,11 +1,4 @@
-/bin/
-/dist/
-node_modules/
-.env
-.env.*
-!.env.example
-credentials*
-*.log
-.idea/
-.vscode/
-.DS_Store
+
+# this module's front end
+ui/node_modules/
+ui/dist/
