@@ -20,7 +20,7 @@ COPY . .
 
 ARG VERSION=dev
 ARG LDFLAGS="-s -w -X main.version=${VERSION}"
-RUN CGO_ENABLED=0 go build -ldflags "${LDFLAGS}" -o /bin/nanoworkspace ./cmd/nanoworkspace
+RUN CGO_ENABLED=0 go build -trimpath -ldflags "${LDFLAGS}" -o /bin/nanoworkspace ./cmd/nanoworkspace
 
 FROM alpine:3.19
 RUN apk add --no-cache ca-certificates tzdata
