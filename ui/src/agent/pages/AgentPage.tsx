@@ -2800,7 +2800,8 @@ function AgentWindow({
   useEffect(() => {
     let cancelled = false
     const sessionID = activeConv.id
-    if (!sessionID) {
+    // Only a stored segment can have meta; a fresh tab would answer 404.
+    if (!sessionID || !sessionID.includes(':v')) {
       setPlanState('none')
       return
     }
