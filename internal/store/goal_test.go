@@ -10,6 +10,8 @@ import (
 	"testing"
 	"time"
 
+	"go.mongodb.org/mongo-driver/v2/bson"
+
 	"gitee.com/kobeyoung81/nanoworkspace/internal/goal"
 )
 
@@ -240,5 +242,39 @@ func TestListByUser_NewestFirst(t *testing.T) {
 	}
 	if goals[0].ID != "g_2" {
 		t.Errorf("newest first: got %s first", goals[0].ID)
+	}
+}
+
+// TestApplyOutcome_OnAGoalWithoutRounds covers the first report: a document
+// whose rounds array was never initialised must accept its first summary
+// instead of failing the whole write.
+func TestApplyOutcome_OnAGoalWithoutRounds(t *testing.T) {
+	st := testStore(t)
+	ctx := context.Background()
+
+	g := newGoal("u1", "g_1")
+	g.Status = goal.Running
+	g.Rounds = nil
+	if err := st.Create(ctx, g); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	// Simulate a document written by an earlier binary.
+	if _, err := st.DB().Collection(goalsCollection).UpdateOne(ctx,
+		bson.D{{Key: "id", Value: "g_1"}},
+		bson.D{{Key: "$set", Value: bson.D{{Key: "rounds", Value: nil}}}}); err != nil {
+		t.Fatalf("null rounds: %v", err)
+	}
+
+	now := time.Now().UTC()
+	out := Outcome{
+		From: []goal.Status{goal.Running}, ExpectRound: 0,
+		Status: goal.Running, Summary: &Round{N: 0, Verdict: "not_yet", At: now},
+	}
+	if err := st.ApplyOutcome(ctx, "u1", "g_1", out, now); err != nil {
+		t.Fatalf("apply outcome: %v", err)
+	}
+	got, _ := st.Get(ctx, "u1", "g_1")
+	if len(got.Rounds) != 1 {
+		t.Fatalf("rounds = %+v, want one summary", got.Rounds)
 	}
 }

@@ -126,6 +126,11 @@ type Goal struct {
 // Create inserts a goal. (user_id, id) is unique, so a retried create fails the
 // same way a concurrent one does.
 func (s *Store) Create(ctx context.Context, g *Goal) error {
+	// rounds must be an array from the first write: a nil slice is stored as
+	// null, and MongoDB refuses $push onto null when the first report arrives.
+	if g.Rounds == nil {
+		g.Rounds = []Round{}
+	}
 	now := time.Now().UTC()
 	if g.CreatedAt.IsZero() {
 		g.CreatedAt = now
@@ -437,6 +442,16 @@ func (s *Store) ApplyOutcome(ctx context.Context, userID, id string, o Outcome, 
 		set = append(set, bson.E{Key: "queue_state", Value: "idle"})
 	} else {
 		set = append(set, bson.E{Key: "queue_state", Value: ""})
+	}
+
+	// A goal created before the array was initialised carries null; $push onto
+	// null fails the whole write, so the first summary repairs it in place.
+	if o.Summary != nil {
+		if _, err := s.db.Collection(goalsCollection).UpdateOne(ctx,
+			bson.D{{Key: "user_id", Value: userID}, {Key: "id", Value: id}, {Key: "rounds", Value: nil}},
+			bson.D{{Key: "$set", Value: bson.D{{Key: "rounds", Value: bson.A{}}}}}); err != nil {
+			return fmt.Errorf("initialise rounds: %w", err)
+		}
 	}
 
 	update := bson.D{{Key: "$set", Value: set}}
