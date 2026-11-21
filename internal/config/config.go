@@ -26,8 +26,8 @@ type Config struct {
 	ProvisionerURL string
 	BusURL         string
 	// UIDir is the built front end this module contributes to the portal (served
-	// at /plugins/workspace/). Empty disables it: the module still works, the portal
-	// then shows its own page.
+	// at /plugins/workspace/). Empty disables it: the API still works, and the
+	// portal reports the page as unavailable — it keeps no copy of it.
 	UIDir string
 	// InternalToken authenticates this service to the portal, the provisioner
 	// and the bus. Empty means every call fails rather than travelling unauthenticated.
