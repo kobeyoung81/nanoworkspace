@@ -2827,7 +2827,15 @@ function AgentWindow({
           first: indexState.first,
           frames,
         })
-        release = window.setTimeout(() => setSettling(false), 150)
+        release = window.setTimeout(() => {
+          const scroller = paneRef.current?.querySelector<HTMLElement>('[data-transcript] > div')
+          recordDiag('transcript.settled', {
+            top: scroller ? Math.round(scroller.scrollTop) : null,
+            sh: scroller ? Math.round(scroller.scrollHeight) : null,
+            ch: scroller ? Math.round(scroller.clientHeight) : null,
+          })
+          setSettling(false)
+        }, 150)
         return
       }
       raf = window.requestAnimationFrame(step)
