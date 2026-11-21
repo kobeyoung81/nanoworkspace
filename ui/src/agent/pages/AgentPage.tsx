@@ -2797,22 +2797,31 @@ function AgentWindow({
   // explicitly, once per show; a reader parked mid-history keeps their row.
   const hasGroups = groups.length > 0
   useEffect(() => {
-    if (!laidOut || !hasGroups || settledRef.current || position.mode !== 'bottom') {
+    if (!laidOut || !hasGroups || settledRef.current) {
       return
     }
     settledRef.current = true
     let inner = 0
     const outer = window.requestAnimationFrame(() => {
       inner = window.requestAnimationFrame(() => {
-        listRef.current?.scrollToIndex({ index: 'LAST', align: 'end' })
-        recordDiag('transcript.settle', { keys: keys.length })
+        // Assert the target instead of trusting the mount: `initialTopMostItemIndex`
+        // is read once, and a mount taken before the pane had a measured box — the
+        // workbench vault, a phone switching panels — drops it.
+        const target = restoreTarget(position, (key) => indexOfKey(indexState.first, keys, key))
+        listRef.current?.scrollToIndex(target)
+        recordDiag('transcript.settle', {
+          mode: position.mode,
+          index: target.index,
+          keys: keys.length,
+          first: indexState.first,
+        })
       })
     })
     return () => {
       window.cancelAnimationFrame(outer)
       window.cancelAnimationFrame(inner)
     }
-  }, [laidOut, hasGroups, position, keys.length])
+  }, [laidOut, hasGroups, position, keys.length, indexState.first, keys])
 
   const handleSuggestion = useCallback((value: string) => {
     applySuggestionRef.current?.(value)

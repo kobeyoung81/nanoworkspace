@@ -13,10 +13,16 @@ import { ArrowLeft, FolderTree, RefreshCw } from 'lucide-react'
 import type { PageContext } from './contract'
 import type { AgentSummary } from './types'
 import { setHost } from './host'
+import { installGlobalGuards } from './agent/lib/debug'
 import { useApi } from './useApi'
 import { FilePanel } from './components/FilePanel'
 import { AgentPage as ChatPage } from './agent/pages/AgentPage'
 import { FileViewerPage as ViewerPage } from './pages/FileViewerPage'
+
+// Window error/rejection guards and the `__diagText()` bug-report hook. The chat
+// keeps a ring buffer of what it did; nothing could read it while this was never
+// installed.
+installGlobalGuards()
 
 /** The agent the URL asks for (`?agent=`), read once at mount. */
 function agentFromLocation(): string | null {
