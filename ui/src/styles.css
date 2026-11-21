@@ -13,10 +13,17 @@
  * styles in charge: no second reset, no duplicated body typography. The colour
  * mappings below mirror `nanoportal/web/src/index.css`, so a class means the same
  * thing in both halves of a screen.
+ *
+ * The utilities go into `plugin`, not `utilities`. This file is appended to
+ * <head> after the shell's stylesheet, and in one layer the later file wins — a
+ * bare `.hidden` here would beat the shell's `.sm\:block`, which is exactly how
+ * every `hidden sm:block` in the shell disappeared from a desktop. `plugin` is
+ * declared by the shell below `utilities`, so the shell's variants win and the
+ * classes only this module uses are still emitted.
  */
-@layer theme, base, components, utilities;
+@layer theme, base, components, plugin, utilities;
 @import 'tailwindcss/theme.css' layer(theme);
-@import 'tailwindcss/utilities.css' layer(utilities);
+@import 'tailwindcss/utilities.css' layer(plugin);
 
 @plugin "@tailwindcss/typography";
 

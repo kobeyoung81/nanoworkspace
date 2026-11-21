@@ -21,6 +21,22 @@ describe('the workspace module ships its own utilities', () => {
     expect(styles).not.toMatch(/@import\s+['"]tailwindcss['"]/)
   })
 
+  it('keeps its utilities out of the shell\'s layer', () => {
+    // This sheet lands in <head> after the shell's, and inside one layer the
+    // later file wins: a bare `.hidden` here beat the shell's `.sm\:block` and
+    // every `hidden sm:block` vanished on a desktop. `plugin` is declared by the
+    // shell below `utilities`, so the shell's variants win again.
+    expect(styles).toContain("utilities.css' layer(plugin)")
+    expect(styles).not.toContain("utilities.css' layer(utilities)")
+
+    const statement = /@layer\s+([a-z,\s-]+);/.exec(styles)
+    expect(statement, 'no @layer statement in styles.css').not.toBeNull()
+    const layers = statement![1].split(',').map((layer) => layer.trim())
+    expect(layers).toContain('plugin')
+    expect(layers).toContain('utilities')
+    expect(layers.indexOf('plugin')).toBeLessThan(layers.indexOf('utilities'))
+  })
+
   it('maps the shell palette names onto the shell variables', () => {
     for (const token of [
       '--color-background',
