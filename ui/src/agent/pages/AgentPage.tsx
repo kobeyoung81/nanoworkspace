@@ -123,7 +123,9 @@ import {
   BOTTOM_POSITION,
   TRANSCRIPT_BOTTOM_THRESHOLD_PX,
   TRANSCRIPT_JUMP_DISTANCE_PX,
+  USER_SCROLL_WINDOW_MS,
   anchorFromRects,
+  isUserScroll,
   restoreTarget,
   type AnchorPosition,
   type RowRect,
@@ -2710,6 +2712,18 @@ function AgentWindow({
   // measurement and a round trip through the vault: a row key plus the offset
   // inside it (see lib/transcriptPosition).
   const anchorRef = useRef<AnchorPosition | null>(null)
+  // When the reader last wheeled/touched/pressed a scroll key. Only a scroll that
+  // follows one of those is the reader's own (see isUserScroll); everything else
+  // is the list positioning itself (initial index, prepends, follow-the-newest).
+  const scrollIntentAtRef = useRef(0)
+  // Sticky version of the same fact: set by the first reader-driven scroll and
+  // cleared once the list has been quiet for a moment, so momentum scrolling keeps
+  // updating the remembered row after the last touch.
+  const userScrollingRef = useRef(false)
+  const scrollQuietTimerRef = useRef(0)
+  // The bottom is asserted once per "show": a mount without a measured box can drop
+  // `initialTopMostItemIndex`, and then nothing would ever put the list back.
+  const settledRef = useRef(false)
   // What the list is put back to when it is mounted again. State rather than a
   // ref because it is read *while rendering* — it becomes the list's
   // `initialTopMostItemIndex`, which is what keeps a pane from painting at the
@@ -2736,8 +2750,69 @@ function AgentWindow({
     if (laidOut) {
       return
     }
-    setPosition(anchorRef.current && !atBottomRef.current ? anchorRef.current : BOTTOM_POSITION)
+    const next =
+      anchorRef.current && !atBottomRef.current ? anchorRef.current : BOTTOM_POSITION
+    setPosition(next)
+    settledRef.current = false
+    recordDiag('transcript.position', {
+      mode: next.mode,
+      key: next.mode === 'anchor' ? next.key.slice(0, 40) : undefined,
+      atBottom: atBottomRef.current,
+    })
   }, [laidOut])
+
+  // A reader's scroll starts with one of these events; the scroll events that
+  // follow are the only ones allowed to become "the row the reader is reading".
+  useEffect(() => {
+    const el = paneRef.current
+    if (!el) {
+      return
+    }
+    const markIntent = () => {
+      scrollIntentAtRef.current = Date.now()
+    }
+    const onKey = (event: globalThis.KeyboardEvent) => {
+      if (['ArrowUp', 'ArrowDown', 'PageUp', 'PageDown', 'Home', 'End', ' '].includes(event.key)) {
+        markIntent()
+      }
+    }
+    const opts: AddEventListenerOptions = { capture: true, passive: true }
+    el.addEventListener('wheel', markIntent, opts)
+    el.addEventListener('touchmove', markIntent, opts)
+    el.addEventListener('pointerdown', markIntent, opts)
+    el.addEventListener('keydown', onKey, true)
+    return () => {
+      el.removeEventListener('wheel', markIntent, opts)
+      el.removeEventListener('touchmove', markIntent, opts)
+      el.removeEventListener('pointerdown', markIntent, opts)
+      el.removeEventListener('keydown', onKey, true)
+      window.clearTimeout(scrollQuietTimerRef.current)
+    }
+  }, [])
+
+  // Showing a pane that was at the bottom must land on the newest row. The list's
+  // own `initialTopMostItemIndex` is only read when it mounts, and a mount taken
+  // before the pane had a measured box (the workbench vault, a phone switching
+  // panels) drops it — the transcript then sits at the oldest row forever. Settle
+  // explicitly, once per show; a reader parked mid-history keeps their row.
+  const hasGroups = groups.length > 0
+  useEffect(() => {
+    if (!laidOut || !hasGroups || settledRef.current || position.mode !== 'bottom') {
+      return
+    }
+    settledRef.current = true
+    let inner = 0
+    const outer = window.requestAnimationFrame(() => {
+      inner = window.requestAnimationFrame(() => {
+        listRef.current?.scrollToIndex({ index: 'LAST', align: 'end' })
+        recordDiag('transcript.settle', { keys: keys.length })
+      })
+    })
+    return () => {
+      window.cancelAnimationFrame(outer)
+      window.cancelAnimationFrame(inner)
+    }
+  }, [laidOut, hasGroups, position, keys.length])
 
   const handleSuggestion = useCallback((value: string) => {
     applySuggestionRef.current?.(value)
@@ -2772,8 +2847,25 @@ function AgentWindow({
       setShowJump((shown) => (shown === jump ? shown : jump))
       if (distance <= TRANSCRIPT_BOTTOM_THRESHOLD_PX) {
         anchorRef.current = null
+        userScrollingRef.current = false
+        window.clearTimeout(scrollQuietTimerRef.current)
         return
       }
+      // A scroll the reader did not ask for (the initial position, a prepend, the
+      // streaming follow) must not become the remembered row: at the moment a
+      // prepend shifts the content, the topmost row is the oldest message, and
+      // remembering it made every later restore jump to the beginning.
+      const now = Date.now()
+      if (isUserScroll(scrollIntentAtRef.current, now, USER_SCROLL_WINDOW_MS)) {
+        userScrollingRef.current = true
+      }
+      if (!userScrollingRef.current) {
+        return
+      }
+      window.clearTimeout(scrollQuietTimerRef.current)
+      scrollQuietTimerRef.current = window.setTimeout(() => {
+        userScrollingRef.current = false
+      }, 250)
       const scrollerTop = el.getBoundingClientRect().top
       const rects: RowRect[] = []
       for (const node of el.querySelectorAll<HTMLElement>('[data-item-index]')) {

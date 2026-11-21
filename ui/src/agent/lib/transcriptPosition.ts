@@ -75,3 +75,25 @@ export function restoreTarget(
   }
   return { index: 'LAST', align: 'end', offset: 0 }
 }
+
+/**
+ * How long after a wheel/touch/key event a scroll still counts as the reader's
+ * own.
+ *
+ * The list also scrolls by itself: the initial position, the library keeping the
+ * viewport while older history is prepended, and follow-the-newest while a turn
+ * streams. Those scrolls must never be remembered as "the row the reader is
+ * reading" — doing so once (the oldest row, because a prepend moves the content
+ * under a viewport that has not been re-anchored yet) made every later restore
+ * jump to the beginning of the conversation.
+ */
+export const USER_SCROLL_WINDOW_MS = 800
+
+/** Whether a scroll event happened because the reader asked for it. */
+export function isUserScroll(lastIntentAt: number, now: number, windowMs = USER_SCROLL_WINDOW_MS): boolean {
+  if (lastIntentAt <= 0) {
+    return false
+  }
+  const since = now - lastIntentAt
+  return since >= 0 && since <= windowMs
+}
