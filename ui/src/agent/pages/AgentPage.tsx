@@ -2716,11 +2716,9 @@ function AgentWindow({
   // follows one of those is the reader's own (see isUserScroll); everything else
   // is the list positioning itself (initial index, prepends, follow-the-newest).
   const scrollIntentAtRef = useRef(0)
-  // Sticky version of the same fact: set by the first reader-driven scroll and
-  // cleared once the list has been quiet for a moment, so momentum scrolling keeps
-  // updating the remembered row after the last touch.
-  const userScrollingRef = useRef(false)
-  const scrollQuietTimerRef = useRef(0)
+  // A scrollbar drag has no wheel/touch events: while the pointer is down on the
+  // transcript, its scrolls are the reader's.
+  const pointerDownRef = useRef(false)
   // The bottom is asserted once per "show": a mount without a measured box can drop
   // `initialTopMostItemIndex`, and then nothing would ever put the list back.
   const settledRef = useRef(false)
@@ -2771,6 +2769,13 @@ function AgentWindow({
     const markIntent = () => {
       scrollIntentAtRef.current = Date.now()
     }
+    const onPointerDown = () => {
+      pointerDownRef.current = true
+      markIntent()
+    }
+    const onPointerUp = () => {
+      pointerDownRef.current = false
+    }
     const onKey = (event: globalThis.KeyboardEvent) => {
       if (['ArrowUp', 'ArrowDown', 'PageUp', 'PageDown', 'Home', 'End', ' '].includes(event.key)) {
         markIntent()
@@ -2779,14 +2784,17 @@ function AgentWindow({
     const opts: AddEventListenerOptions = { capture: true, passive: true }
     el.addEventListener('wheel', markIntent, opts)
     el.addEventListener('touchmove', markIntent, opts)
-    el.addEventListener('pointerdown', markIntent, opts)
+    el.addEventListener('pointerdown', onPointerDown, opts)
     el.addEventListener('keydown', onKey, true)
+    window.addEventListener('pointerup', onPointerUp, true)
+    window.addEventListener('pointercancel', onPointerUp, true)
     return () => {
       el.removeEventListener('wheel', markIntent, opts)
       el.removeEventListener('touchmove', markIntent, opts)
-      el.removeEventListener('pointerdown', markIntent, opts)
+      el.removeEventListener('pointerdown', onPointerDown, opts)
       el.removeEventListener('keydown', onKey, true)
-      window.clearTimeout(scrollQuietTimerRef.current)
+      window.removeEventListener('pointerup', onPointerUp, true)
+      window.removeEventListener('pointercancel', onPointerUp, true)
     }
   }, [])
 
@@ -2880,25 +2888,21 @@ function AgentWindow({
       setShowJump((shown) => (shown === jump ? shown : jump))
       if (distance <= TRANSCRIPT_BOTTOM_THRESHOLD_PX) {
         anchorRef.current = null
-        userScrollingRef.current = false
-        window.clearTimeout(scrollQuietTimerRef.current)
         return
       }
       // A scroll the reader did not ask for (the initial position, a prepend, the
       // streaming follow) must not become the remembered row: at the moment a
       // prepend shifts the content, the topmost row is the oldest message, and
       // remembering it made every later restore jump to the beginning.
+      // Only a scroll the reader just asked for may update the remembered row.
+      // The window is anchored to the *intent event*, not refreshed by scroll
+      // events: a list that re-measures itself and adjusts scrollTop a second
+      // later is not the reader moving, and recording it once put the last row (or
+      // the first) in the remembered slot.
       const now = Date.now()
-      if (isUserScroll(scrollIntentAtRef.current, now, USER_SCROLL_WINDOW_MS)) {
-        userScrollingRef.current = true
-      }
-      if (!userScrollingRef.current) {
+      if (!pointerDownRef.current && !isUserScroll(scrollIntentAtRef.current, now, USER_SCROLL_WINDOW_MS)) {
         return
       }
-      window.clearTimeout(scrollQuietTimerRef.current)
-      scrollQuietTimerRef.current = window.setTimeout(() => {
-        userScrollingRef.current = false
-      }, 250)
       const scrollerTop = el.getBoundingClientRect().top
       const rects: RowRect[] = []
       for (const node of el.querySelectorAll<HTMLElement>('[data-item-index]')) {

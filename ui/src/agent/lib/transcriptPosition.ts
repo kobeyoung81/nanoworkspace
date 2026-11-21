@@ -87,7 +87,7 @@ export function restoreTarget(
  * under a viewport that has not been re-anchored yet) made every later restore
  * jump to the beginning of the conversation.
  */
-export const USER_SCROLL_WINDOW_MS = 800
+export const USER_SCROLL_WINDOW_MS = 400
 
 /** Whether a scroll event happened because the reader asked for it. */
 export function isUserScroll(lastIntentAt: number, now: number, windowMs = USER_SCROLL_WINDOW_MS): boolean {
