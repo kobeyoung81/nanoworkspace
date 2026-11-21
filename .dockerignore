@@ -1,0 +1,52 @@
+# Build-context hygiene.
+#
+# The Go stage runs `COPY . .`, so every file here would otherwise become part of
+# a layer (and part of the context Docker sends to the daemon on each build).
+#
+# Keep: ui/ and web/ sources (the front-end stage copies them), deploy/, and the
+# module's own sources.
+
+# Version control
+.git
+.gitignore
+.gitmodules
+
+# Documentation and CI — the image is built by Jenkins, not from the context
+doc/
+docs/
+.github/
+
+# Build and test output
+**/node_modules
+**/dist
+**/build
+**/.vite
+**/*.tsbuildinfo
+*.out
+coverage.out
+coverage.html
+/bin/
+/out/
+
+# Test sources: L1 runs them from the checkout, and `go build` never compiles
+# them, so they do not belong in the context.
+*_test.go
+**/*_test.go
+
+# Go workspace files (per-developer; would override module resolution)
+go.work
+go.work.sum
+
+# Local state and secrets
+.env
+*.secret.json
+deploy/*.local
+
+# Editor and OS noise
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db

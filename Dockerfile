@@ -1,28 +1,30 @@
 # This module's front end: a module-federation remote the portal loads at runtime.
-FROM node:22-alpine AS ui
+FROM kobeyoung81/base-node:26.13.1-alpine3.24-r2 AS ui
 
 WORKDIR /src/ui
 COPY ui/package.json ui/package-lock.json ./
-RUN npm ci --no-audit --no-fund
+RUN --mount=type=cache,id=nanosec-npm,target=/root/.npm \
+    npm ci --no-audit --no-fund --prefer-offline
 COPY ui/ ./
 RUN npm run build
 
-FROM golang:1.25-alpine AS builder
+FROM kobeyoung81/base-go:1.27.4-alpine3.24-r2 AS builder
 
 WORKDIR /src
-RUN go env -w GO111MODULE=on
-RUN go env -w GOPROXY=https://goproxy.cn,direct
-RUN apk add --no-cache git
 COPY go.mod go.sum ./
-RUN go mod download
+RUN --mount=type=cache,id=nanosec-gomod,target=/root/go/pkg/mod \
+    --mount=type=cache,id=nanosec-gocache,target=/root/.cache/go-build \
+    go mod download
 
 COPY . .
 
 ARG VERSION=dev
 ARG LDFLAGS="-s -w -X main.version=${VERSION}"
-RUN CGO_ENABLED=0 go build -trimpath -ldflags "${LDFLAGS}" -o /bin/nanoworkspace ./cmd/nanoworkspace
+RUN --mount=type=cache,id=nanosec-gomod,target=/root/go/pkg/mod \
+    --mount=type=cache,id=nanosec-gocache,target=/root/.cache/go-build \
+    go build -trimpath -ldflags "${LDFLAGS}" -o /bin/nanoworkspace ./cmd/nanoworkspace
 
-FROM alpine:3.19
+FROM kobeyoung81/base-runtime:alpine3.24.4-r2
 
 # Build metadata. All three come from the tagged commit (the version tag, the
 # commit sha, and that commit's time), so two builds of one tag describe the same
@@ -37,7 +39,6 @@ LABEL org.opencontainers.image.title="nanoworkspace" \
       org.opencontainers.image.source="https://gitee.com/kobeyoung81/nanoworkspace" \
       org.opencontainers.image.licenses="AGPL-3.0-only"
 
-RUN apk add --no-cache ca-certificates tzdata
 COPY --from=builder /bin/nanoworkspace /usr/local/bin/nanoworkspace
 COPY --from=ui /src/ui/dist /app/ui
 
