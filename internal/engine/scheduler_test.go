@@ -44,6 +44,9 @@ type fakeStore struct {
 	overdue   []*store.Goal
 	lastValue store.Outcome
 	active    int64
+	// overdueBefore is the deadline the sweeper asked for: the grace period is
+	// the whole point, so the test asserts it rather than trusting the fake.
+	overdueBefore time.Time
 }
 
 func (f *fakeStore) DueGoals(_ context.Context, _ time.Time, _ int) ([]*store.Goal, error) {
@@ -78,7 +81,8 @@ func (f *fakeStore) ApplyOutcome(_ context.Context, _ string, _ string, o store.
 	return nil
 }
 
-func (f *fakeStore) OverdueCancellations(_ context.Context, _ time.Time, _ int) ([]*store.Goal, error) {
+func (f *fakeStore) OverdueCancellations(_ context.Context, before time.Time, _ int) ([]*store.Goal, error) {
+	f.overdueBefore = before
 	return f.overdue, nil
 }
 

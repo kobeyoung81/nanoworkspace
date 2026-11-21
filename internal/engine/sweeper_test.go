@@ -35,6 +35,11 @@ func TestSweep_FinishesAnUnacknowledgedStop(t *testing.T) {
 	if st.lastValue.Summary == nil || st.lastValue.Summary.Verdict != "interrupted" {
 		t.Errorf("summary = %+v, want an interrupted round", st.lastValue.Summary)
 	}
+	// The deadline is "sixty seconds ago": a sweep that asked for anything else
+	// would stop goals the agent is still working on, or never stop any.
+	if age := time.Since(st.overdueBefore); age < 55*time.Second || age > 70*time.Second {
+		t.Errorf("sweeper looked for cancellations before %v (%v ago), want about 60s", st.overdueBefore, age)
+	}
 	if st.lastValue.Summary != nil && st.lastValue.Summary.N != 5 {
 		t.Errorf("summary round = %d, want the round that was interrupted", st.lastValue.Summary.N)
 	}
