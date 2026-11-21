@@ -136,8 +136,12 @@ export function GoalDraft({ agentId, sessionKey, planRef, onClose, onStarted }: 
   }
 
   const { draft, verdict } = view
-  const ready = verdict.missing.length === 0 && verdict.blockers.length === 0
-  const filled = verdict.filled.length
+  // A response the page cannot read must not take the composer down with it.
+  const missing = verdict?.missing ?? []
+  const blockers = verdict?.blockers ?? []
+  const risks = verdict?.risks ?? []
+  const filled = verdict?.filled?.length ?? 0
+  const ready = missing.length === 0 && blockers.length === 0
 
   return (
     <div className="m-2 overflow-hidden rounded-lg border bg-card shadow-sm" data-goal-draft={draft.id}>
@@ -201,9 +205,9 @@ export function GoalDraft({ agentId, sessionKey, planRef, onClose, onStarted }: 
         </div>
       </div>
 
-      {verdict.blockers.length > 0 ? (
+      {blockers.length > 0 ? (
         <div className="border-t border-destructive/30 bg-destructive/5 px-3 py-2 text-xs text-destructive">
-          {verdict.blockers.map((b) => (
+          {blockers.map((b) => (
             <div key={b} className="flex items-start gap-1">
               <AlertTriangle className="mt-0.5 size-3.5 shrink-0" />
               <span>{b}</span>
@@ -213,7 +217,7 @@ export function GoalDraft({ agentId, sessionKey, planRef, onClose, onStarted }: 
       ) : null}
 
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-t bg-muted/20 px-3 py-2 text-[11px] text-muted-foreground">
-        {verdict.risks.map((r) => (
+        {risks.map((r) => (
           <span key={r} className="flex items-center gap-1">
             <AlertTriangle className="size-3 shrink-0" />
             {r}
@@ -222,10 +226,10 @@ export function GoalDraft({ agentId, sessionKey, planRef, onClose, onStarted }: 
       </div>
 
       <div className="flex items-center gap-2 border-t px-3 py-2">
-        {verdict.missing.length > 0 ? (
+        {missing.length > 0 ? (
           <span className="text-xs text-amber-600" data-goal-missing>
             {t('goal.draft.missing', { defaultValue: '还差：' })}
-            {verdict.missing.map((m) => t(`goal.check.${m}`, { defaultValue: m })).join('、')}
+            {missing.map((m) => t(`goal.check.${m}`, { defaultValue: m })).join('、')}
           </span>
         ) : (
           <span className="text-xs text-emerald-600">{t('goal.draft.ready', { defaultValue: '六项齐全，可以开始' })}</span>

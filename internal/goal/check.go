@@ -48,12 +48,12 @@ type DraftFields struct {
 
 // Verdict is the result of the intake check.
 type Verdict struct {
-	Filled   []string
-	Missing  []string
-	Blockers []string
+	Filled   []string `json:"filled"`
+	Missing  []string `json:"missing"`
+	Blockers []string `json:"blockers"`
 	// Risks are the read-only lines the confirmation card shows. They explain
 	// what the user is agreeing to, not what is wrong.
-	Risks []string
+	Risks []string `json:"risks"`
 }
 
 // Ready reports whether the goal may start: nothing missing and no blocker.
