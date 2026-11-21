@@ -2909,7 +2909,15 @@ function AgentWindow({
         const box = node.getBoundingClientRect()
         rects.push({ key, top: box.top - scrollerTop, bottom: box.bottom - scrollerTop })
       }
-      anchorRef.current = anchorFromRects(rects)
+      const anchor = anchorFromRects(rects)
+      anchorRef.current = anchor
+      recordDiag('transcript.anchor', {
+        key: anchor ? anchor.key.slice(0, 40) : null,
+        offset: anchor ? anchor.offset : null,
+        top: Math.round(el.scrollTop),
+        distance: Math.round(distance),
+        rows: rects.length,
+      })
     },
     [indexState.first, keys],
   )
