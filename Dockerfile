@@ -1,5 +1,5 @@
 # This module's front end: a module-federation remote the portal loads at runtime.
-FROM kobeyoung81/base-node:26.13.1-alpine3.24-r2 AS ui
+FROM kobeyoung81/base-node:26.13.1-alpine3.24-r3 AS ui
 
 WORKDIR /src/ui
 COPY ui/package.json ui/package-lock.json ./
@@ -8,7 +8,7 @@ RUN --mount=type=cache,id=nanosec-npm,target=/root/.npm \
 COPY ui/ ./
 RUN npm run build
 
-FROM kobeyoung81/base-go:1.27.4-alpine3.24-r2 AS builder
+FROM kobeyoung81/base-go:1.27.4-alpine3.24-r3 AS builder
 
 WORKDIR /src
 COPY go.mod go.sum ./
@@ -24,7 +24,7 @@ RUN --mount=type=cache,id=nanosec-gomod,target=/root/go/pkg/mod \
     --mount=type=cache,id=nanosec-gocache,target=/root/.cache/go-build \
     go build -trimpath -ldflags "${LDFLAGS}" -o /bin/nanoworkspace ./cmd/nanoworkspace
 
-FROM kobeyoung81/base-runtime:alpine3.24.4-r2
+FROM kobeyoung81/base-runtime:alpine3.24.4-r3
 
 # Build metadata. All three come from the tagged commit (the version tag, the
 # commit sha, and that commit's time), so two builds of one tag describe the same
