@@ -128,6 +128,7 @@ import {
   isUserScroll,
   restoreTarget,
   type AnchorPosition,
+  type RestoreTarget,
   type RowRect,
   type TranscriptPosition,
 } from '../lib/transcriptPosition'
@@ -2814,46 +2815,49 @@ function AgentWindow({
     }
     settledRef.current = true
     setSettling(true)
-    let raf = 0
-    let frames = 0
+    let cancelled = false
+    let timer = 0
     let release = 0
-    const step = () => {
-      frames += 1
-      // Wait for a real viewport: the mount may happen in the frame the panel is
-      // re-parented out of the vault, where every measurement is zero.
-      const scroller = paneRef.current?.querySelector<HTMLElement>('[data-transcript] > div')
-      const ready = scroller !== null && scroller !== undefined && scroller.clientHeight > 40
-      if (ready || frames > 30) {
-        // Assert the target instead of trusting the mount: `initialTopMostItemIndex`
-        // is read once, and a mount taken before the pane had a measured box drops it.
-        const target = restoreTarget(position, (key) => positionOfKey(keys, key))
-        listRef.current?.scrollToIndex(target)
-        recordDiag('transcript.settle', {
-          mode: position.mode,
-          index: target.index,
-          keys: keys.length,
-          first: indexState.first,
-          frames,
-        })
-        release = window.setTimeout(() => {
-          const scroller = paneRef.current?.querySelector<HTMLElement>('[data-transcript] > div')
-          recordDiag('transcript.settled', {
-            top: scroller ? Math.round(scroller.scrollTop) : null,
-            sh: scroller ? Math.round(scroller.scrollHeight) : null,
-            ch: scroller ? Math.round(scroller.clientHeight) : null,
-          })
-          setSettling(false)
-        }, 150)
+    // The remembered row may be in a segment the pane has not read yet (the older
+    // history arrives in the background). Waiting for it beats falling back to the
+    // newest row and calling that a restore; the cap keeps a row that will never
+    // come (its segment was replaced) from blocking the pane.
+    const attempt = (tries: number) => {
+      if (cancelled) {
         return
       }
-      raf = window.requestAnimationFrame(step)
+      const scroller = paneRef.current?.querySelector<HTMLElement>('[data-transcript] > div')
+      const measurable = scroller !== null && scroller !== undefined && scroller.clientHeight > 40
+      const anchorIndex = position.mode === 'anchor' ? positionOfKey(keys, position.key) : null
+      const anchorPending = position.mode === 'anchor' && anchorIndex === null && (hasMoreHistory || loadingOlder)
+      if (!measurable || (anchorPending && tries < 40)) {
+        timer = window.setTimeout(() => attempt(tries + 1), 100)
+        return
+      }
+      const index = position.mode === 'anchor' ? (anchorIndex ?? 'LAST') : 'LAST'
+      const target: RestoreTarget =
+        position.mode === 'anchor' && anchorIndex !== null
+          ? { index: anchorIndex, align: 'start', offset: position.offset }
+          : { index: 'LAST', align: 'end', offset: 0 }
+      listRef.current?.scrollToIndex(target)
+      recordDiag('transcript.settle', { mode: position.mode, index, keys: keys.length, first: indexState.first, tries })
+      release = window.setTimeout(() => {
+        const el = paneRef.current?.querySelector<HTMLElement>('[data-transcript] > div')
+        recordDiag('transcript.settled', {
+          top: el ? Math.round(el.scrollTop) : null,
+          sh: el ? Math.round(el.scrollHeight) : null,
+          ch: el ? Math.round(el.clientHeight) : null,
+        })
+        setSettling(false)
+      }, 150)
     }
-    raf = window.requestAnimationFrame(step)
+    attempt(0)
     return () => {
-      window.cancelAnimationFrame(raf)
+      cancelled = true
+      window.clearTimeout(timer)
       window.clearTimeout(release)
     }
-  }, [laidOut, hasGroups, position, keys.length, indexState.first, keys])
+  }, [laidOut, hasGroups, position, keys, indexState.first, hasMoreHistory, loadingOlder])
 
   const handleSuggestion = useCallback((value: string) => {
     applySuggestionRef.current?.(value)
