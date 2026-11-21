@@ -57,6 +57,19 @@
         "module": "workspace/pages",
         "export": "AgentPage"
       }
+    },
+    {
+      "id": "tasks",
+      "path": "/tasks",
+      "title": {
+        "zh-CN": "长程目标",
+        "en": "Long-run goals"
+      },
+      "mount": {
+        "kind": "module",
+        "module": "workspace/pages",
+        "export": "TasksPage"
+      }
     }
   ],
   "provides": {

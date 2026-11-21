@@ -14,6 +14,7 @@ import (
 	"gitee.com/kobeyoung81/nanoworkspace/internal/auth"
 	"gitee.com/kobeyoung81/nanoworkspace/internal/engine"
 	"gitee.com/kobeyoung81/nanoworkspace/internal/goal"
+	"gitee.com/kobeyoung81/nanoworkspace/internal/metrics"
 	"gitee.com/kobeyoung81/nanoworkspace/internal/store"
 )
 
@@ -264,20 +265,21 @@ func (s *Server) handleGoalReport(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	started := time.Now()
 	now := time.Now().UTC()
 	out, err := engine.Decide(g, rep, now, s.goalVerify)
 	switch {
 	case errors.Is(err, engine.ErrStaleRound):
+		metrics.GoalJudgeFailures.Inc()
 		writeJSON(w, http.StatusConflict, map[string]string{"error": err.Error()})
 		return
 	case err != nil:
+		metrics.GoalJudgeFailures.Inc()
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
-		return
-	case errors.Is(err, store.ErrConflict):
-		writeJSON(w, http.StatusConflict, map[string]string{"error": "goal changed"})
 		return
 	}
 	if err := s.goals.ApplyOutcome(r.Context(), g.UserID, g.ID, out, now); err != nil {
+		metrics.GoalJudgeFailures.Inc()
 		if errors.Is(err, store.ErrConflict) {
 			writeJSON(w, http.StatusConflict, map[string]string{"error": "goal changed"})
 			return
@@ -286,6 +288,8 @@ func (s *Server) handleGoalReport(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
 		return
 	}
+	metrics.GoalRounds.WithLabelValues(rep.Verdict).Inc()
+	metrics.GoalJudgeSeconds.Observe(time.Since(started).Seconds())
 	writeJSON(w, http.StatusOK, map[string]any{"status": out.Status, "round": g.Round})
 }
 

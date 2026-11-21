@@ -36,7 +36,33 @@ var (
 	}, []string{"route"})
 )
 
-func init() { prometheus.MustRegister(HTTPRequests, HTTPSeconds) }
+// GoalRounds counts judged rounds by verdict, so "is it moving and how does it
+// end" is one series.
+var GoalRounds = prometheus.NewCounterVec(prometheus.CounterOpts{
+	Name: "workspace_goal_rounds_total",
+	Help: "Long-running goal rounds by the verdict the judge returned.",
+}, []string{"verdict"})
+
+// GoalJudgeSeconds measures how long a report takes to be applied. The judge
+// itself runs in the agent container; this is the host's half of the round trip
+// (report received → state written), which is what a slow write-back shows up in.
+var GoalJudgeSeconds = prometheus.NewHistogram(prometheus.HistogramOpts{
+	Name:    "workspace_goal_report_seconds",
+	Help:    "Time from receiving a round report to writing its outcome.",
+	Buckets: []float64{0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5},
+})
+
+// GoalJudgeFailures counts reports that could not be applied (a stale round, a
+// lost race, a bad body). Three in a row pauses a goal, so this is the series to
+// alert on.
+var GoalJudgeFailures = prometheus.NewCounter(prometheus.CounterOpts{
+	Name: "workspace_goal_judge_failures_total",
+	Help: "Round reports the host could not apply.",
+})
+
+func init() {
+	prometheus.MustRegister(HTTPRequests, HTTPSeconds, GoalRounds, GoalJudgeSeconds, GoalJudgeFailures)
+}
 
 // Handler serves the Prometheus text exposition.
 func Handler() http.Handler { return promhttp.Handler() }

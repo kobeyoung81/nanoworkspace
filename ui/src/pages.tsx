@@ -17,6 +17,7 @@ import { useApi } from './useApi'
 import { FilePanel } from './components/FilePanel'
 import { AgentPage as ChatPage } from './agent/pages/AgentPage'
 import { FileViewerPage as ViewerPage } from './pages/FileViewerPage'
+import { TasksPage as TasksPageImpl } from './pages/TasksPage'
 
 /** The agent the URL asks for (`?agent=`), read once at mount. */
 function agentFromLocation(): string | null {
@@ -145,6 +146,14 @@ export { FilePanel } from './components/FilePanel'
 export function FileViewerPage({ ctx }: { ctx: PageContext }) {
   setHost(ctx)
   return <ViewerPage />
+}
+
+/**
+ * The long-running goals panel.
+ */
+export function TasksPage({ ctx }: { ctx: PageContext }) {
+  setHost(ctx)
+  return <TasksPageImpl ctx={ctx} />
 }
 
 /**
