@@ -2731,6 +2731,21 @@ function AgentWindow({
 
   const groups = useMemo(() => groupMessages(visibleMessages(messages)), [messages])
   const keys = useMemo(() => groups.map((group) => group.key), [groups])
+  // A row's stable handle: a group key is derived from the group's first message,
+  // and prepending older history into a run changes it (see AnchorPosition).
+  const groupByKey = useMemo(() => new Map(groups.map((group) => [group.key, group])), [groups])
+  const groupPositionOfMessage = useCallback(
+    (messageId: string | undefined): number | null => {
+      if (!messageId) {
+        return null
+      }
+      const index = groups.findIndex((group) =>
+        group.run ? group.run.some((message) => message.id === messageId) : group.message?.id === messageId,
+      )
+      return index < 0 ? null : index
+    },
+    [groups],
+  )
   // The virtual index space (see lib/transcriptIndex). Older history is prepended
   // to the front of the list, and the library keeps the viewport by index, so the
   // first index has to follow the prepend — derived during render rather than in
@@ -2828,7 +2843,10 @@ function AgentWindow({
       }
       const scroller = paneRef.current?.querySelector<HTMLElement>('[data-transcript] > div')
       const measurable = scroller !== null && scroller !== undefined && scroller.clientHeight > 40
-      const anchorIndex = position.mode === 'anchor' ? positionOfKey(keys, position.key) : null
+      const anchorIndex =
+        position.mode === 'anchor'
+          ? positionOfKey(keys, position.key) ?? groupPositionOfMessage(position.messageId)
+          : null
       const anchorPending = position.mode === 'anchor' && anchorIndex === null && (hasMoreHistory || loadingOlder)
       if (!measurable || (anchorPending && tries < 40)) {
         timer = window.setTimeout(() => attempt(tries + 1), 100)
@@ -2857,7 +2875,7 @@ function AgentWindow({
       window.clearTimeout(timer)
       window.clearTimeout(release)
     }
-  }, [laidOut, hasGroups, position, keys, indexState.first, hasMoreHistory, loadingOlder])
+  }, [laidOut, hasGroups, position, keys, indexState.first, hasMoreHistory, loadingOlder, groupPositionOfMessage])
 
   const handleSuggestion = useCallback((value: string) => {
     applySuggestionRef.current?.(value)
@@ -2918,6 +2936,10 @@ function AgentWindow({
         rects.push({ key, top: box.top - scrollerTop, bottom: box.bottom - scrollerTop })
       }
       const anchor = anchorFromRects(rects)
+      const group = anchor ? groupByKey.get(anchor.key) : undefined
+      if (anchor && group) {
+        anchor.messageId = (group.run?.[0] ?? group.message)?.id
+      }
       anchorRef.current = anchor
       recordDiag('transcript.anchor', {
         key: anchor ? anchor.key.slice(0, 40) : null,
@@ -2927,7 +2949,7 @@ function AgentWindow({
         rows: rects.length,
       })
     },
-    [indexState.first, keys],
+    [indexState.first, keys, groupByKey],
   )
 
   // The conversation's goals: the banner asks by base key, so a compaction does

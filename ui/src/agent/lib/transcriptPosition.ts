@@ -9,8 +9,15 @@
 
 /** The reader is on the newest row and wants to stay there. */
 export type BottomPosition = { mode: 'bottom' }
-/** The reader parked on a row: its key, and how far into it they had scrolled. */
-export type AnchorPosition = { mode: 'anchor'; key: string; offset: number }
+/**
+ * The reader parked on a row: its key, and how far into it they had scrolled.
+ *
+ * `messageId` is the row's first message. Rows are grouped (a run of thoughts and
+ * tool calls is one row) and a group's key is derived from its first message, so
+ * the key changes when older history is prepended into that run — the id is the
+ * stable handle the restore falls back to.
+ */
+export type AnchorPosition = { mode: 'anchor'; key: string; offset: number; messageId?: string }
 export type TranscriptPosition = BottomPosition | AnchorPosition
 
 export const BOTTOM_POSITION: BottomPosition = { mode: 'bottom' }
