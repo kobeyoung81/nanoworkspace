@@ -75,11 +75,6 @@ function targetIndex(copy: AgentMessage[], chunk: LiveChunk, nextId: IdFactory):
   return { index: -1, id: nextId() }
 }
 
-/**
- * Closes every streaming thought/tool block: only the newest block may flash,
- * and an earlier one left open would keep its indicator running under a newer
- * response.
- */
 // Block kinds whose `streaming` flag only ever means "frames are still arriving".
 // A `question` block is deliberately absent: there it means "waiting for the
 // user's answer", which survives a finished turn (the pending-question metadata
@@ -114,6 +109,11 @@ export function finalizeStaleBlocks(messages: AgentMessage[], at: number): Agent
     .filter((message) => !(message.role === 'assistant' && message.kind === 'content' && message.content.trim() === ''))
 }
 
+/**
+ * Closes every streaming thought/tool block: only the newest block may flash,
+ * and an earlier one left open would keep its indicator running under a newer
+ * response.
+ */
 export function finalizeBlocks(messages: AgentMessage[], at: number): AgentMessage[] {
   return messages
     .map((message) => {
