@@ -2,6 +2,7 @@ import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
 import { federation } from '@module-federation/vite'
+import { splitUtilityLayers } from './vite-plugins/splitUtilityLayers'
 
 // The workspace module's front end.
 //
@@ -20,6 +21,9 @@ export default defineConfig({
   plugins: [
     react(),
     tailwindcss(),
+    // Base rules one layer below the shell, variants in the shell's own layer:
+    // see vite-plugins/splitUtilityLayers.ts for why both are needed.
+    splitUtilityLayers(),
     federation({
       name: 'workspace',
       filename: 'remoteEntry.js',
