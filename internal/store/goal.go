@@ -177,6 +177,28 @@ func (s *Store) GetByID(ctx context.Context, id string) (*Goal, error) {
 	return &g, nil
 }
 
+// ListBySession returns the goals bound to one conversation (base key), newest
+// first. The banner reads this: a conversation's goals, not the account's.
+func (s *Store) ListBySession(ctx context.Context, userID, sessionKey string) ([]*Goal, error) {
+	cur, err := s.db.Collection(goalsCollection).Find(ctx,
+		bson.D{{Key: "user_id", Value: userID}, {Key: "session_key", Value: sessionKey}},
+		options.Find().SetSort(bson.D{{Key: "updated_at", Value: -1}}).SetLimit(50))
+	if err != nil {
+		return nil, fmt.Errorf("list session goals: %w", err)
+	}
+	defer func() { _ = cur.Close(ctx) }()
+
+	out := make([]*Goal, 0, 4)
+	for cur.Next(ctx) {
+		var g Goal
+		if err := cur.Decode(&g); err != nil {
+			return nil, fmt.Errorf("decode goal: %w", err)
+		}
+		out = append(out, &g)
+	}
+	return out, cur.Err()
+}
+
 // ListByUser returns a user's goals, newest first.
 func (s *Store) ListByUser(ctx context.Context, userID string, limit int) ([]*Goal, error) {
 	if limit <= 0 || limit > 200 {
@@ -530,4 +552,141 @@ func (s *Store) CountActiveForAgent(ctx context.Context, agentID string) (int64,
 		return 0, fmt.Errorf("count active goals: %w", err)
 	}
 	return n, nil
+}
+
+// FindDraft returns the user's unfinished draft for one conversation, newest
+// first. It is the idempotency key behind "same session reuses the draft".
+func (s *Store) FindDraft(ctx context.Context, userID, sessionKey string) (*Goal, error) {
+	var g Goal
+	err := s.db.Collection(goalsCollection).FindOne(ctx,
+		bson.D{
+			{Key: "user_id", Value: userID},
+			{Key: "session_key", Value: sessionKey},
+			{Key: "status", Value: string(goal.Draft)},
+		},
+		options.FindOne().SetSort(bson.D{{Key: "updated_at", Value: -1}}),
+	).Decode(&g)
+	if errors.Is(err, mongo.ErrNoDocuments) {
+		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("find draft: %w", err)
+	}
+	return &g, nil
+}
+
+// DraftPatch is the part of a draft the user edits.
+type DraftPatch struct {
+	Title       *string
+	Condition   *string
+	Proof       *[]ProofStep
+	Constraints *[]string
+	PlanRef     *string
+	Mode        *string
+	MaxRounds   *int
+	MaxMinutes  *int
+}
+
+// UpdateDraft writes the fields the user changed. Only drafts are touched: a
+// started goal has a different lifecycle and is edited through its own budget or
+// fork paths.
+func (s *Store) UpdateDraft(ctx context.Context, userID, id string, p DraftPatch) error {
+	set := bson.D{{Key: "updated_at", Value: time.Now().UTC()}}
+	if p.Title != nil {
+		set = append(set, bson.E{Key: "title", Value: *p.Title})
+	}
+	if p.Condition != nil {
+		set = append(set, bson.E{Key: "condition", Value: *p.Condition})
+	}
+	if p.Proof != nil {
+		set = append(set, bson.E{Key: "proof", Value: *p.Proof})
+	}
+	if p.Constraints != nil {
+		set = append(set, bson.E{Key: "constraints", Value: *p.Constraints})
+	}
+	if p.PlanRef != nil {
+		set = append(set, bson.E{Key: "plan_ref", Value: *p.PlanRef})
+	}
+	if p.Mode != nil {
+		set = append(set, bson.E{Key: "mode", Value: *p.Mode})
+	}
+	if p.MaxRounds != nil {
+		set = append(set, bson.E{Key: "max_rounds", Value: *p.MaxRounds})
+	}
+	if p.MaxMinutes != nil {
+		set = append(set, bson.E{Key: "max_minutes", Value: *p.MaxMinutes})
+	}
+	res, err := s.db.Collection(goalsCollection).UpdateOne(ctx,
+		bson.D{{Key: "user_id", Value: userID}, {Key: "id", Value: id}, {Key: "status", Value: string(goal.Draft)}},
+		bson.D{{Key: "$set", Value: set}})
+	if err != nil {
+		return fmt.Errorf("update draft: %w", err)
+	}
+	if res.MatchedCount == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// StartDraft turns a draft into a running goal: it gets a start time and a
+// first round due immediately.
+func (s *Store) StartDraft(ctx context.Context, userID, id string, now time.Time) error {
+	// The card's "start" walks the two edges the state machine already has, so
+	// the table stays the only description of the lifecycle.
+	if err := s.SetStatus(ctx, userID, id, []goal.Status{goal.Draft}, goal.Validating, "", "开始校验", now); err != nil {
+		return err
+	}
+	if err := s.SetStatus(ctx, userID, id, []goal.Status{goal.Validating}, goal.Ready, "", "已确认，等待第一轮", now); err != nil {
+		return err
+	}
+	res, err := s.db.Collection(goalsCollection).UpdateOne(ctx,
+		bson.D{{Key: "user_id", Value: userID}, {Key: "id", Value: id}, {Key: "status", Value: string(goal.Ready)}},
+		bson.D{{Key: "$set", Value: bson.D{
+			{Key: "started_at", Value: now.UTC()},
+			{Key: "next_round_at", Value: now.UTC()},
+			{Key: "updated_at", Value: now.UTC()},
+		}}})
+	if err != nil {
+		return fmt.Errorf("start draft: %w", err)
+	}
+	if res.MatchedCount == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// PromoteToRunning moves a confirmed goal into the run loop. It is separate from
+// StartDraft because the confirmation and the first tick are two moments.
+func (s *Store) PromoteToRunning(ctx context.Context, userID, id string, now time.Time) error {
+	return s.SetStatus(ctx, userID, id, []goal.Status{goal.Ready}, goal.Running, "", "开始执行", now)
+}
+
+// UpdateBudget raises (or lowers) the two limits. A goal paused for budget goes
+// back to running: that is the whole point of letting a human raise it.
+func (s *Store) UpdateBudget(ctx context.Context, userID, id string, rounds, minutes int, now time.Time) error {
+	set := bson.D{
+		{Key: "max_rounds", Value: rounds},
+		{Key: "max_minutes", Value: minutes},
+		{Key: "updated_at", Value: now.UTC()},
+	}
+	if _, err := s.db.Collection(goalsCollection).UpdateOne(ctx,
+		bson.D{{Key: "user_id", Value: userID}, {Key: "id", Value: id}},
+		bson.D{{Key: "$set", Value: set}}); err != nil {
+		return fmt.Errorf("update budget: %w", err)
+	}
+	// A budget pause is lifted by the raise itself.
+	_, _ = s.db.Collection(goalsCollection).UpdateOne(ctx,
+		bson.D{
+			{Key: "user_id", Value: userID}, {Key: "id", Value: id},
+			{Key: "status", Value: string(goal.Paused)},
+			{Key: "pause_reason", Value: string(goal.PauseBudget)},
+		},
+		bson.D{{Key: "$set", Value: bson.D{
+			{Key: "status", Value: string(goal.Running)},
+			{Key: "status_reason", Value: "预算已放宽，继续"},
+			{Key: "pause_reason", Value: ""},
+			{Key: "next_round_at", Value: now.UTC()},
+			{Key: "updated_at", Value: now.UTC()},
+		}}})
+	return nil
 }

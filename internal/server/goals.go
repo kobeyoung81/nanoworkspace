@@ -35,12 +35,19 @@ func (s *Server) SetGoals(st *store.Store, internalToken string, verify bool) {
 // because they act on the same resource — only the caller differs.
 func (s *Server) registerGoalRoutes(mux *http.ServeMux, prefix string) {
 	mux.HandleFunc("POST "+prefix+"/goals", s.handleGoalCreate)
+	// The creation surface: a draft, its answers and the start button.
+	mux.HandleFunc("POST "+prefix+"/goals/drafts", s.handleDraftCreate)
+	mux.HandleFunc("PATCH "+prefix+"/goals/drafts/{id}", s.handleDraftPatch)
+	mux.HandleFunc("POST "+prefix+"/goals/drafts/{id}/answer", s.handleDraftAnswer)
+	mux.HandleFunc("POST "+prefix+"/goals/drafts/{id}/start", s.handleDraftStart)
 	mux.HandleFunc("GET "+prefix+"/goals", s.handleGoalList)
 	mux.HandleFunc("GET "+prefix+"/goals/{id}", s.handleGoalGet)
 	mux.HandleFunc("POST "+prefix+"/goals/{id}/report", s.handleGoalReport)
 	mux.HandleFunc("POST "+prefix+"/goals/{id}/pause", s.handleGoalPause)
 	mux.HandleFunc("POST "+prefix+"/goals/{id}/resume", s.handleGoalResume)
 	mux.HandleFunc("POST "+prefix+"/goals/{id}/cancel", s.handleGoalCancel)
+	mux.HandleFunc("POST "+prefix+"/goals/{id}/budget", s.handleGoalBudget)
+	mux.HandleFunc("POST "+prefix+"/goals/{id}/fork", s.handleGoalFork)
 }
 
 // goalsReady answers 503 before the store is attached.
@@ -191,7 +198,17 @@ func (s *Server) handleGoalList(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
 		return
 	}
-	goals, err := s.goals.ListByUser(r.Context(), identity.UserID, 200)
+	// The banner asks for one conversation's goals; the panel asks for all of
+	// them. Both are the same list, filtered by the base key when it is given.
+	var (
+		goals []*store.Goal
+		err   error
+	)
+	if key := strings.TrimSpace(r.URL.Query().Get("session_key")); key != "" {
+		goals, err = s.goals.ListBySession(r.Context(), identity.UserID, key)
+	} else {
+		goals, err = s.goals.ListByUser(r.Context(), identity.UserID, 200)
+	}
 	if err != nil {
 		slog.Error("list goals", "error", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})

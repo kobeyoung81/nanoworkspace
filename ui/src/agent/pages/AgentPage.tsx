@@ -1,5 +1,5 @@
 import { lazy, Suspense, memo, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type FormEvent, type KeyboardEvent, type MouseEvent as ReactMouseEvent } from 'react'
-import { AlertTriangle, ArrowDown, Bot, Brain, Brush, CheckCircle2, ChevronDown, Circle, Command, Cpu, FolderOpen, FolderPlus, GitBranch, HelpCircle, ImagePlus, Lightbulb, Loader2, MessageSquare, MessageSquarePlus, Mic, Minimize2, MoreHorizontal, Paperclip, Plus, RefreshCw, Send, Settings, Sparkles, Square, SquareTerminal, Trash2, Wrench, X, XCircle, Zap } from 'lucide-react'
+import { AlertTriangle, ArrowDown, Bot, Brain, Brush, CheckCircle2, ChevronDown, Circle, Command, Cpu, FolderOpen, FolderPlus, GitBranch, HelpCircle, ImagePlus, Lightbulb, Loader2, MessageSquare, MessageSquarePlus, Mic, Minimize2, MoreHorizontal, Paperclip, Plus, RefreshCw, Send, Settings, Sparkles, Square, SquareTerminal, Target, Trash2, Wrench, X, XCircle, Zap } from 'lucide-react'
 import { Navigate, useNavigate, useSearchParams } from '../router'
 import { toast } from '../lib/toast'
 import { useTranslation } from 'react-i18next'
@@ -106,6 +106,8 @@ import {
   type SessionSummary,
 } from '../lib/api'
 import { compactThresholdPct } from '../lib/contextRing'
+import { GoalDraft } from '../components/goal/GoalDraft'
+import { GoalBanner } from '../components/goal/GoalBanner'
 import { conversationModeOf, defaultModeOf, resolveAgentMode } from '../lib/agentMode'
 import { getAgentMode, setAgentMode } from '../lib/capabilities'
 import { listMyModels } from '../lib/models'
@@ -2780,6 +2782,10 @@ function AgentWindow({
     [indexState.first, keys],
   )
 
+  // The conversation's goals: the banner asks by base key, so a compaction does
+  // not detach the banner from its goal.
+  const { activeConversationKey } = useWorkbench()
+
   const handleAtBottom = useCallback((atBottom: boolean) => {
     atBottomRef.current = atBottom
     if (atBottom) {
@@ -2823,6 +2829,7 @@ function AgentWindow({
 
   return (
     <div ref={paneRef} className="flex h-full min-h-0 flex-col">
+      {activeConversationKey ? <GoalBanner sessionKey={activeConversationKey} /> : null}
       <div className="relative min-h-0 flex-1">
         {laidOut ? (
           groups.length === 0 ? (
@@ -3335,6 +3342,10 @@ function Composer({
   // active says whether this conversation is the one on screen: every open tab
   // stays mounted, so it is what keeps a shortcut press out of the other tabs.
   const { sendCommand, stop, busy, serverRunning, active } = useChatWorkbench()
+  // The goal card is a server-backed draft, so it needs the conversation's base
+  // key: that is what the scheduler will dispatch rounds into.
+  const { activeConversationKey, selectedAgent } = useWorkbench()
+  const [goalOpen, setGoalOpen] = useState(false)
   const working = busy || serverRunning
   // The toolbar's fit ladder: the row is measured and steps down until its
   // trailing controls sit inside the composer's border (see hooks/composerFit.ts).
@@ -3655,6 +3666,14 @@ function Composer({
 
   return (
     <form ref={composerRef} onSubmit={submit} className="p-3 pt-1">
+      {goalOpen && selectedAgent && activeConversationKey ? (
+        <GoalDraft
+          agentId={selectedAgent}
+          sessionKey={activeConversationKey}
+          onClose={() => setGoalOpen(false)}
+          onStarted={() => setGoalOpen(false)}
+        />
+      ) : null}
       <div className="relative w-full">
         <div className="pointer-events-none absolute -inset-px z-0 rounded-lg shadow-[0_0_14px_-6px] shadow-primary/20" aria-hidden />
         {attachments.length > 0 ? (
@@ -3797,7 +3816,7 @@ function Composer({
                 voiceActive && 'hidden',
               )}
             >
-              <InstructionsMenu onCommand={sendCommand} tier={tier} />
+              <InstructionsMenu onCommand={sendCommand} onGoal={() => setGoalOpen(true)} tier={tier} />
             </div>
           ) : null}
           {voiceActive ? (
@@ -4034,13 +4053,22 @@ function StopButton({ onStop }: { onStop: () => void }) {
 // the composer. First: force context compaction.
 const COMPOSER_INSTRUCTIONS = [
   { id: 'compact', labelKey: 'composer.instructions.compact', icon: Minimize2 },
+  { id: 'goal', labelKey: 'composer.instructions.goal', icon: Target },
 ] as const
 
 // InstructionsMenu exposes agent instructions (slash commands) from the
 // composer. It closes on outside click/Escape and fits its content. `tier` is the
 // toolbar's fit ladder: from the icon-only tier on, the trigger keeps its icon
 // and its accessible name but drops the label (see hooks/composerFit.ts).
-function InstructionsMenu({ onCommand, tier }: { onCommand: (command: string) => void; tier: number }) {
+function InstructionsMenu({
+  onCommand,
+  onGoal,
+  tier,
+}: {
+  onCommand: (command: string) => void
+  onGoal: () => void
+  tier: number
+}) {
   const { t } = useTranslation()
   const iconOnly = tier >= INSTRUCTIONS_ICON_ONLY_TIER
   const [open, setOpen] = useState(false)
@@ -4094,7 +4122,13 @@ function InstructionsMenu({ onCommand, tier }: { onCommand: (command: string) =>
                 key={instruction.id}
                 type="button"
                 onClick={() => {
-                  onCommand(`/${instruction.id}`)
+                  // The goal card is not a slash command: it opens in place
+                  // instead of sending a message the model would have to answer.
+                  if (instruction.id === 'goal') {
+                    onGoal()
+                  } else {
+                    onCommand(`/${instruction.id}`)
+                  }
                   setOpen(false)
                 }}
                 className="flex w-full items-center gap-2 whitespace-nowrap rounded-md px-2.5 py-1.5 text-left text-xs hover:bg-accent"
