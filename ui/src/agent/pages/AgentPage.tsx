@@ -133,7 +133,7 @@ import {
 } from '../lib/transcriptPosition'
 import {
   BASE_FIRST_ITEM_INDEX,
-  indexOfKey,
+  positionOfKey,
   keyAtIndex,
   nextFirstItemIndex,
   sameKeys,
@@ -2818,7 +2818,7 @@ function AgentWindow({
       if (ready || frames > 30) {
         // Assert the target instead of trusting the mount: `initialTopMostItemIndex`
         // is read once, and a mount taken before the pane had a measured box drops it.
-        const target = restoreTarget(position, (key) => indexOfKey(indexState.first, keys, key))
+        const target = restoreTarget(position, (key) => positionOfKey(keys, key))
         listRef.current?.scrollToIndex(target)
         recordDiag('transcript.settle', {
           mode: position.mode,
@@ -3000,7 +3000,7 @@ function AgentWindow({
                 ref={listRef}
                 data={groups}
                 firstItemIndex={indexState.first}
-                initialTopMostItemIndex={restoreTarget(position, (key) => indexOfKey(indexState.first, keys, key))}
+                initialTopMostItemIndex={restoreTarget(position, (key) => positionOfKey(keys, key))}
                 computeItemKey={(_, group) => group.key}
                 itemContent={(_, group) => (
                   <div className="px-4 pb-4">

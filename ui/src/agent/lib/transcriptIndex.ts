@@ -48,10 +48,18 @@ export function nextFirstItemIndex(
   return first - countPrepended(previous, keys)
 }
 
-/** The virtual index of a row, or null when the row is not in the list. */
-export function indexOfKey(first: number, keys: readonly string[], key: string): number | null {
+/**
+ * The row's offset inside the data array, or null when it is not in the list.
+ *
+ * react-virtuoso reads `initialTopMostItemIndex` and `scrollToIndex` in this
+ * space: the count it clamps against is the data length, and the library adds
+ * `firstItemIndex` itself when it turns the row into a virtual index. Handing it
+ * the virtual index (100000 + n) therefore clamps to the *last* row — which is
+ * how a remembered row silently turned into "the newest message".
+ */
+export function positionOfKey(keys: readonly string[], key: string): number | null {
   const position = keys.indexOf(key)
-  return position < 0 ? null : first + position
+  return position < 0 ? null : position
 }
 
 /** The row at a virtual index, or null when the index is outside the list. */
