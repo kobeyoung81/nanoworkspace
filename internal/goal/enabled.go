@@ -14,7 +14,11 @@ import (
 // enabledKey is the platform switch, read from the admin module's "agent"
 // component. Configuration belongs to admin (the bus stopped serving it), so
 // this service asks admin over HTTP like the bus does.
-const enabledKey = "agent.goal.enabled"
+//
+// The key has no component prefix: the seeder stores the name the entry was
+// declared with, and the agent component already spells its own prefix on the
+// entries that want one (agent.scheduledTaskMode) and not on this one.
+const enabledKey = "goal.enabled"
 
 // enabledTTL is how long a read is trusted. Thirty seconds is short enough that
 // turning the switch off takes effect within one scheduler tick of a human

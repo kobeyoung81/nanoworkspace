@@ -25,10 +25,11 @@ func configServer(t *testing.T, key, value string) (*httptest.Server, *int32) {
 	return srv, &calls
 }
 
-// TestEnabled_ReadsTheSwitch is the happy path: the key is on, and the switch
-// answers true.
+// TestEnabled_ReadsTheSwitch is the happy path, and it spells the key out on
+// purpose: the constant and the server both coming from enabledKey would keep
+// the test green if the constant drifted away from what the seeder stores.
 func TestEnabled_ReadsTheSwitch(t *testing.T) {
-	srv, _ := configServer(t, enabledKey, "true")
+	srv, _ := configServer(t, "goal.enabled", "true")
 	c := NewEnabled(srv.URL, "test-token")
 	if !c.Enabled(context.Background()) {
 		t.Fatal("enabled switch should be true")
