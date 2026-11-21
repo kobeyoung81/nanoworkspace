@@ -2936,18 +2936,13 @@ function AgentWindow({
         rects.push({ key, top: box.top - scrollerTop, bottom: box.bottom - scrollerTop })
       }
       const anchor = anchorFromRects(rects)
-      const group = anchor ? groupByKey.get(anchor.key) : undefined
-      if (anchor && group) {
-        anchor.messageId = (group.run?.[0] ?? group.message)?.id
+      if (anchor) {
+        // The row's first message is the stable handle: a group key changes when
+        // older history is prepended into the run (see AnchorPosition).
+        const group = groupByKey.get(anchor.key)
+        anchor.messageId = (group?.run?.[0] ?? group?.message)?.id
       }
       anchorRef.current = anchor
-      recordDiag('transcript.anchor', {
-        key: anchor ? anchor.key.slice(0, 40) : null,
-        offset: anchor ? anchor.offset : null,
-        top: Math.round(el.scrollTop),
-        distance: Math.round(distance),
-        rows: rects.length,
-      })
     },
     [indexState.first, keys, groupByKey],
   )
