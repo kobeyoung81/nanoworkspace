@@ -94,17 +94,26 @@ type Goal struct {
 
 	VerifyRound  int    `bson:"verify_round" json:"verify_round"`
 	VerifyResult string `bson:"verify_result,omitempty" json:"verify_result,omitempty"`
-	ResumeCount  int    `bson:"resume_count" json:"resume_count"`
-	StuckReason  string `bson:"stuck_reason,omitempty" json:"stuck_reason,omitempty"`
-	BudgetRaised int    `bson:"budget_raised" json:"budget_raised"`
+	// PauseReason is the structured reason a goal stopped (user|stuck|budget).
+	// status_reason is for humans; this field is what resume/budget code reads.
+	PauseReason string `bson:"pause_reason,omitempty" json:"pause_reason,omitempty"`
+	// EvidenceDigest is the sorted command+exit list of the last work round. The
+	// verification round is compared against it: same commands, same codes.
+	EvidenceDigest string `bson:"evidence_digest,omitempty" json:"evidence_digest,omitempty"`
+	ResumeCount    int    `bson:"resume_count" json:"resume_count"`
+	StuckReason    string `bson:"stuck_reason,omitempty" json:"stuck_reason,omitempty"`
+	BudgetRaised   int    `bson:"budget_raised" json:"budget_raised"`
 
 	Rounds []Round `bson:"rounds" json:"rounds"`
 	Result *Result `bson:"result,omitempty" json:"result,omitempty"`
 
-	SpentTokens      int64  `bson:"spent_tokens" json:"spent_tokens"`
-	LastVerdict      string `bson:"last_verdict,omitempty" json:"last_verdict,omitempty"`
-	LastReason       string `bson:"last_reason,omitempty" json:"last_reason,omitempty"`
-	NoProgressRounds int    `bson:"no_progress_rounds" json:"no_progress_rounds"`
+	SpentTokens int64  `bson:"spent_tokens" json:"spent_tokens"`
+	LastVerdict string `bson:"last_verdict,omitempty" json:"last_verdict,omitempty"`
+	LastReason  string `bson:"last_reason,omitempty" json:"last_reason,omitempty"`
+	// LastMissing is the previous round's "still missing" list; the next round's
+	// injection quotes the first few items.
+	LastMissing      []string `bson:"last_missing,omitempty" json:"last_missing,omitempty"`
+	NoProgressRounds int      `bson:"no_progress_rounds" json:"no_progress_rounds"`
 
 	NextRoundAt       *time.Time `bson:"next_round_at,omitempty" json:"next_round_at,omitempty"`
 	ClaimedAt         *time.Time `bson:"claimed_at,omitempty" json:"claimed_at,omitempty"`
@@ -139,6 +148,21 @@ func (s *Store) Get(ctx context.Context, userID, id string) (*Goal, error) {
 		{Key: "user_id", Value: userID},
 		{Key: "id", Value: id},
 	}).Decode(&g)
+	if errors.Is(err, mongo.ErrNoDocuments) {
+		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("get goal: %w", err)
+	}
+	return &g, nil
+}
+
+// GetByID reads one goal without an owner filter. Only the internal surface uses
+// it: a round report arrives from the agent container, which has no user token,
+// and the goal id it carries is the whole binding.
+func (s *Store) GetByID(ctx context.Context, id string) (*Goal, error) {
+	var g Goal
+	err := s.db.Collection(goalsCollection).FindOne(ctx, bson.D{{Key: "id", Value: id}}).Decode(&g)
 	if errors.Is(err, mongo.ErrNoDocuments) {
 		return nil, ErrNotFound
 	}
@@ -192,6 +216,7 @@ func (s *Store) ClaimRound(ctx context.Context, userID, id string, round int, no
 		},
 		bson.D{{Key: "$set", Value: bson.D{
 			{Key: "claimed_at", Value: now.UTC()},
+			{Key: "queue_state", Value: "running"},
 			{Key: "updated_at", Value: now.UTC()},
 		}}})
 	if err != nil {
@@ -236,6 +261,13 @@ func (s *Store) SetStatus(ctx context.Context, userID, id string, from []goal.St
 	}
 	if reason != "" {
 		set = append(set, bson.E{Key: "pause_reason", Value: reason})
+	} else {
+		set = append(set, bson.E{Key: "pause_reason", Value: ""})
+	}
+	if to == goal.Running || to == goal.Verifying {
+		set = append(set, bson.E{Key: "queue_state", Value: "idle"})
+	} else {
+		set = append(set, bson.E{Key: "queue_state", Value: ""})
 	}
 	switch to {
 	case goal.Paused, goal.Cancelling:
@@ -279,6 +311,7 @@ func (s *Store) AppendRound(ctx context.Context, userID, id string, r Round, las
 				{Key: "last_verdict", Value: lastVerdict},
 				{Key: "last_reason", Value: lastReason},
 				{Key: "claimed_at", Value: nil},
+				{Key: "queue_state", Value: "idle"},
 				{Key: "updated_at", Value: now.UTC()},
 			}},
 		})
@@ -289,4 +322,197 @@ func (s *Store) AppendRound(ctx context.Context, userID, id string, r Round, las
 		return ErrNotFound
 	}
 	return nil
+}
+
+// DueGoals returns the goals whose next round is due, soonest first.
+//
+// A goal with no next round time is not due: that is how a paused or finished
+// goal stays out of the scheduler without a second condition.
+func (s *Store) DueGoals(ctx context.Context, now time.Time, limit int) ([]*Goal, error) {
+	if limit <= 0 || limit > 500 {
+		limit = 100
+	}
+	cur, err := s.db.Collection(goalsCollection).Find(ctx,
+		bson.D{
+			{Key: "status", Value: bson.D{{Key: "$in", Value: bson.A{string(goal.Running), string(goal.Verifying)}}}},
+			{Key: "next_round_at", Value: bson.D{
+				{Key: "$ne", Value: nil},
+				{Key: "$lte", Value: now.UTC()},
+			}},
+		},
+		options.Find().SetSort(bson.D{{Key: "next_round_at", Value: 1}}).SetLimit(int64(limit)))
+	if err != nil {
+		return nil, fmt.Errorf("list due goals: %w", err)
+	}
+	defer func() { _ = cur.Close(ctx) }()
+
+	out := make([]*Goal, 0, 8)
+	for cur.Next(ctx) {
+		var g Goal
+		if err := cur.Decode(&g); err != nil {
+			return nil, fmt.Errorf("decode goal: %w", err)
+		}
+		out = append(out, &g)
+	}
+	return out, cur.Err()
+}
+
+// Outcome is everything one report changes on a goal document.
+//
+// It is written in a single conditional update so a pause that races a report
+// cannot be half-applied: either the goal was in an expected status and at the
+// expected round, or nothing moves.
+type Outcome struct {
+	From        []goal.Status
+	ExpectRound int // -1 skips the round check (pauses and resumes)
+	Status      goal.Status
+	// StatusReason is the human-facing line; PauseReason the structured one.
+	StatusReason  string
+	PauseReason   goal.PauseReason
+	Round         *int
+	NextRoundAt   *time.Time
+	ClearSchedule bool
+	VerifyResult  *string
+	Evidence      *string
+	Missing       *[]string
+	NoProgress    *int
+	Result        *Result
+	Summary       *Round
+}
+
+// ApplyOutcome writes one report's consequences.
+func (s *Store) ApplyOutcome(ctx context.Context, userID, id string, o Outcome, now time.Time) error {
+	if len(o.From) == 0 {
+		return fmt.Errorf("apply outcome: no source status")
+	}
+	sources := make(bson.A, 0, len(o.From))
+	for _, f := range o.From {
+		sources = append(sources, string(f))
+	}
+	filter := bson.D{
+		{Key: "user_id", Value: userID},
+		{Key: "id", Value: id},
+		{Key: "status", Value: bson.D{{Key: "$in", Value: sources}}},
+	}
+	if o.ExpectRound >= 0 {
+		filter = append(filter, bson.E{Key: "round", Value: o.ExpectRound})
+	}
+
+	set := bson.D{
+		{Key: "status", Value: o.Status},
+		{Key: "status_reason", Value: o.StatusReason},
+		{Key: "pause_reason", Value: o.PauseReason},
+		{Key: "updated_at", Value: now.UTC()},
+	}
+	if o.Round != nil {
+		set = append(set, bson.E{Key: "round", Value: *o.Round})
+	}
+	if o.ClearSchedule {
+		set = append(set, bson.E{Key: "next_round_at", Value: nil})
+		set = append(set, bson.E{Key: "claimed_at", Value: nil})
+	} else if o.NextRoundAt != nil {
+		set = append(set, bson.E{Key: "next_round_at", Value: o.NextRoundAt.UTC()})
+		set = append(set, bson.E{Key: "claimed_at", Value: nil})
+	}
+	if o.VerifyResult != nil {
+		set = append(set, bson.E{Key: "verify_result", Value: *o.VerifyResult})
+	}
+	if o.Evidence != nil {
+		set = append(set, bson.E{Key: "evidence_digest", Value: *o.Evidence})
+	}
+	if o.Missing != nil {
+		set = append(set, bson.E{Key: "last_missing", Value: *o.Missing})
+	}
+	if o.NoProgress != nil {
+		set = append(set, bson.E{Key: "no_progress_rounds", Value: *o.NoProgress})
+	}
+	if o.Result != nil {
+		set = append(set, bson.E{Key: "result", Value: o.Result})
+		set = append(set, bson.E{Key: "ended_at", Value: now.UTC()})
+	}
+	if o.Status == goal.Cancelling {
+		set = append(set, bson.E{Key: "cancel_requested_at", Value: now.UTC()})
+	}
+	if o.Status == goal.Running || o.Status == goal.Verifying {
+		set = append(set, bson.E{Key: "queue_state", Value: "idle"})
+	} else {
+		set = append(set, bson.E{Key: "queue_state", Value: ""})
+	}
+
+	update := bson.D{{Key: "$set", Value: set}}
+	if o.Summary != nil {
+		update = append(update, bson.E{Key: "$push", Value: bson.D{{Key: "rounds", Value: bson.D{
+			{Key: "$each", Value: bson.A{*o.Summary}},
+			{Key: "$slice", Value: -roundSummaryLimit},
+		}}}})
+	}
+
+	result, err := s.db.Collection(goalsCollection).UpdateOne(ctx, filter, update)
+	if err != nil {
+		return fmt.Errorf("apply outcome: %w", err)
+	}
+	if result.MatchedCount == 0 {
+		return ErrConflict
+	}
+	return nil
+}
+
+// ReleaseClaim gives a claim back without touching the round.
+//
+// It is used when a round could not be delivered at all: holding the claim would
+// make the scheduler wait out the whole lease before retrying a message that
+// never left the process.
+func (s *Store) ReleaseClaim(ctx context.Context, userID, id string) error {
+	_, err := s.db.Collection(goalsCollection).UpdateOne(ctx,
+		bson.D{{Key: "user_id", Value: userID}, {Key: "id", Value: id}},
+		bson.D{{Key: "$set", Value: bson.D{
+			{Key: "claimed_at", Value: nil},
+			{Key: "queue_state", Value: "idle"},
+		}}})
+	if err != nil {
+		return fmt.Errorf("release claim: %w", err)
+	}
+	return nil
+}
+
+// OverdueCancellations returns goals that asked to stop before the deadline and
+// are still waiting for the agent to acknowledge it.
+func (s *Store) OverdueCancellations(ctx context.Context, before time.Time, limit int) ([]*Goal, error) {
+	if limit <= 0 {
+		limit = 100
+	}
+	cur, err := s.db.Collection(goalsCollection).Find(ctx,
+		bson.D{
+			{Key: "status", Value: goal.Cancelling},
+			{Key: "cancel_requested_at", Value: bson.D{{Key: "$ne", Value: nil}, {Key: "$lte", Value: before.UTC()}}},
+		},
+		options.Find().SetLimit(int64(limit)))
+	if err != nil {
+		return nil, fmt.Errorf("list overdue cancellations: %w", err)
+	}
+	defer func() { _ = cur.Close(ctx) }()
+
+	out := make([]*Goal, 0, 4)
+	for cur.Next(ctx) {
+		var g Goal
+		if err := cur.Decode(&g); err != nil {
+			return nil, fmt.Errorf("decode goal: %w", err)
+		}
+		out = append(out, &g)
+	}
+	return out, cur.Err()
+}
+
+// CountActiveForAgent reports how many of an agent's goals hold the execution
+// slot. The scheduler uses it to keep one round at a time per agent: two goals
+// would edit the same working tree.
+func (s *Store) CountActiveForAgent(ctx context.Context, agentID string) (int64, error) {
+	n, err := s.db.Collection(goalsCollection).CountDocuments(ctx, bson.D{
+		{Key: "agent_id", Value: agentID},
+		{Key: "queue_state", Value: "running"},
+	})
+	if err != nil {
+		return 0, fmt.Errorf("count active goals: %w", err)
+	}
+	return n, nil
 }

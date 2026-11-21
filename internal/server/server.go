@@ -19,6 +19,7 @@ import (
 	"gitee.com/kobeyoung81/nanoworkspace/internal/agents"
 	"gitee.com/kobeyoung81/nanoworkspace/internal/auth"
 	"gitee.com/kobeyoung81/nanoworkspace/internal/metrics"
+	"gitee.com/kobeyoung81/nanoworkspace/internal/store"
 	"gitee.com/kobeyoung81/nanoworkspace/internal/tunnel"
 )
 
@@ -60,6 +61,14 @@ type Server struct {
 	srv     *http.Server
 	// MaxFileBytes is the upload cap; the caller may lower or raise it.
 	MaxFileBytes int64
+
+	// goals is the long-running-goal store. nil until SetGoals is called: the
+	// file and git surface works (and is tested) without a database.
+	goals *store.Store
+	// internalToken is what an agent container presents when it reports a round.
+	internalToken string
+	// goalVerify enables the verification round.
+	goalVerify bool
 }
 
 // New builds the server. uiDir optionally carries this module's front end (see
@@ -79,6 +88,7 @@ func New(addr string, jwt *auth.Validator, ag *agents.Client, tn *tunnel.Client,
 	// prefix stays as an alias until no caller uses it.
 	for _, prefix := range browserPrefixes {
 		s.registerFileRoutes(mux, prefix)
+		s.registerGoalRoutes(mux, prefix)
 	}
 	s.srv = &http.Server{Addr: addr, Handler: metrics.Middleware(s.authenticate(mux)), ReadHeaderTimeout: 10 * time.Second}
 	return s
@@ -120,7 +130,14 @@ func (s *Server) authenticate(next http.Handler) http.Handler {
 			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
 			return
 		}
-		identity, err := s.jwt.Validate(strings.TrimSpace(value[len(prefix):]))
+		presented := strings.TrimSpace(value[len(prefix):])
+		// An agent container has no browser token. It presents the platform's
+		// internal token, and only the report endpoint treats that as enough.
+		if internalTokenMatches(presented, s.internalToken) {
+			next.ServeHTTP(w, r.WithContext(auth.WithInternal(r.Context())))
+			return
+		}
+		identity, err := s.jwt.Validate(presented)
 		if err != nil {
 			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
 			return

@@ -64,6 +64,21 @@ func FromContext(ctx context.Context) (Identity, bool) {
 	return id, ok
 }
 
+// internalKey marks a request that presented the platform's internal token: an
+// agent container reporting a round, not a browser.
+type internalKey struct{}
+
+// WithInternal marks the request as an internal call.
+func WithInternal(ctx context.Context) context.Context {
+	return context.WithValue(ctx, internalKey{}, true)
+}
+
+// InternalFromContext reports whether the request is an internal call.
+func InternalFromContext(ctx context.Context) (bool, bool) {
+	v, ok := ctx.Value(internalKey{}).(bool)
+	return v, ok
+}
+
 // Validator checks nanoauth-issued RS256 tokens against its JWKS endpoint.
 type Validator struct {
 	jwksURL   string
