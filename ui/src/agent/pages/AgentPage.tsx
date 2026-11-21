@@ -2797,11 +2797,13 @@ function AgentWindow({
   const [goalActive, setGoalActive] = useState(false)
   const [planState, setPlanState] = useState<'none' | 'unused'>('none')
   const activeConv = useActiveConversation()
+  const { fresh: chatFresh } = useChatWorkbench()
   useEffect(() => {
     let cancelled = false
     const sessionID = activeConv.id
-    // Only a stored segment can have meta; a fresh tab would answer 404.
-    if (!sessionID || !sessionID.includes(':v')) {
+    // Only a stored, non-fresh segment can have meta; anything else would answer
+    // 404 and leave a red line in the console for a page that works.
+    if (chatFresh || !sessionID || !sessionID.includes(':v')) {
       setPlanState('none')
       return
     }
@@ -2815,7 +2817,7 @@ function AgentWindow({
     return () => {
       cancelled = true
     }
-  }, [activeConv.id])
+  }, [activeConv.id, chatFresh])
 
   const handleAtBottom = useCallback((atBottom: boolean) => {
     atBottomRef.current = atBottom
