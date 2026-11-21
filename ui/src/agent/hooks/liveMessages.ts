@@ -80,6 +80,40 @@ function targetIndex(copy: AgentMessage[], chunk: LiveChunk, nextId: IdFactory):
  * and an earlier one left open would keep its indicator running under a newer
  * response.
  */
+// Block kinds whose `streaming` flag only ever means "frames are still arriving".
+// A `question` block is deliberately absent: there it means "waiting for the
+// user's answer", which survives a finished turn (the pending-question metadata
+// decides it, not the stream).
+const STALE_STREAMING_KINDS = new Set(['content', 'thought', 'tool_group', 'compaction'])
+
+/** Whether this block is a leftover the end of the turn should have closed. */
+export function isStaleStreamingBlock(message: AgentMessage): boolean {
+  return message.role === 'assistant' && message.streaming && STALE_STREAMING_KINDS.has(message.kind)
+}
+
+/**
+ * Closes the blocks a dropped stream left spinning, without touching a question
+ * the user still has to answer.
+ *
+ * The end-of-turn path is the `complete` frame, which a socket that died while
+ * the turn was running never delivers. The history read that follows carries the
+ * finished content; this is the fallback for when even that read fails (offline,
+ * session deleted): drop the spinners, keep what the reader already saw.
+ */
+export function finalizeStaleBlocks(messages: AgentMessage[], at: number): AgentMessage[] {
+  return messages
+    .map((message): AgentMessage => {
+      if (!isStaleStreamingBlock(message)) {
+        return message
+      }
+      if (message.role === 'assistant' && message.kind === 'thought') {
+        return { ...message, streaming: false, elapsedMs: Math.max(0, at - message.startedAt) }
+      }
+      return { ...message, streaming: false }
+    })
+    .filter((message) => !(message.role === 'assistant' && message.kind === 'content' && message.content.trim() === ''))
+}
+
 export function finalizeBlocks(messages: AgentMessage[], at: number): AgentMessage[] {
   return messages
     .map((message) => {

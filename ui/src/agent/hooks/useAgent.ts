@@ -4,10 +4,19 @@ import { ReconnectBackoff } from '../lib/reconnect'
 import { createChannelLogger, recordDiag } from '../lib/debug'
 import { readRawState, writeRawState } from '../lib/clientState'
 import { conversationModeOf } from '../lib/agentMode'
-import { appendLiveChunk, ensureCompactionDivider, finalizeBlocks, patchCompactionSummary, patchFinalAnswer } from './liveMessages'
+import {
+  appendLiveChunk,
+  ensureCompactionDivider,
+  finalizeBlocks,
+  finalizeStaleBlocks,
+  isStaleStreamingBlock,
+  patchCompactionSummary,
+  patchFinalAnswer,
+} from './liveMessages'
 import { COMPACTION_SILENCE_BUDGET_MS, turnLooksAlive } from './turnState'
-import { mergeSegment, nextSegmentToRead, prependSegment } from './segmentMerge'
+import { mergeAfterTurnEnd, mergeSegment, nextSegmentToRead, prependSegment } from './segmentMerge'
 import { handshakeVerdict, resumeIDFor } from '../lib/sessionResume'
+import { heartbeatDue, needsProbeBeforeSend, probeTimedOut } from '../lib/chatLiveness'
 import i18n from '../i18n'
 import type { SessionMetaSnapshot } from '../lib/sessionMeta'
 
@@ -323,7 +332,25 @@ export function useAgent(
   const chatIdRef = useRef<string | null>(null)
   const sessionIdRef = useRef<string | null>(null)
   const currentAssistantIdRef = useRef<string | null>(null)
-  const pendingSendsRef = useRef<{ content: string; mode: AgentMode; media: ChatMediaItem[] }[]>([])
+  // Frames the socket could not take yet: queued while disconnected and while a
+  // liveness probe is in flight, flushed the moment the connection answers.
+  const pendingFramesRef = useRef<string[]>([])
+  // Liveness bookkeeping. `lastInboundAt` is refreshed by every frame the server
+  // sends (including pongs); `probeSentAt` marks an unanswered probe (0 = none).
+  const lastInboundAtRef = useRef(Date.now())
+  const probeSentAtRef = useRef(0)
+  // Set by the socket effect: send a probe now, flush the queue, reconnect at
+  // once. Held in refs so the visibility handlers and `send` can reach them
+  // without depending on the connection effect.
+  const probeRef = useRef<(() => void) | null>(null)
+  const flushRef = useRef<(() => void) | null>(null)
+  const reconnectNowRef = useRef<(() => void) | null>(null)
+  // The transcript is read by non-React callers (heal, liveness) without making
+  // every chunk re-create the socket effect.
+  const messagesRef = useRef<AgentMessage[]>([])
+  const busyRef = useRef(false)
+  const serverRunningRef = useRef(false)
+  const healingRef = useRef(false)
   const unloadedSegmentsRef = useRef(0)
   const mountedRef = useRef(true)
   // The latest access token, read inside connect() so the socket effect does
@@ -370,6 +397,15 @@ export function useAgent(
   useEffect(() => {
     unloadedSegmentsRef.current = unloadedSegments
   }, [unloadedSegments])
+  useEffect(() => {
+    messagesRef.current = messages
+  }, [messages])
+  useEffect(() => {
+    busyRef.current = busy
+  }, [busy])
+  useEffect(() => {
+    serverRunningRef.current = serverRunning
+  }, [serverRunning])
   useEffect(() => {
     mountedRef.current = true
     return () => {
@@ -482,8 +518,12 @@ export function useAgent(
 
   // applyHead merges the segment the socket runs on into the transcript and
   // starts the background walk of everything older.
+  //
+  // `authoritative` means the read says the turn is over: the stored row is the
+  // finished turn, so leftover streaming blocks (a `complete` that never reached
+  // this client) are replaced instead of preserved.
   const applyHead = useCallback(
-    (segment: LoadedSegment) => {
+    (segment: LoadedSegment, authoritative = false) => {
       setServerRunning(segment.turnRunning)
       setTodos(segment.todos ?? [])
       setPendingQuestion(segment.pendingQuestion ?? null)
@@ -496,7 +536,9 @@ export function useAgent(
       const headWasLoaded = headLoadedRef.current
       setMessages((current) =>
         ensureCompactionDivider(
-          mergeSegment(current, segment.messages, prefixCountRef.current, headWasLoaded),
+          authoritative
+            ? mergeAfterTurnEnd(current, segment.messages, prefixCountRef.current)
+            : mergeSegment(current, segment.messages, prefixCountRef.current, headWasLoaded),
           // Only while the turn is still live: a compaction marker left behind by
           // a crashed agent must not render a divider that never finishes.
           Boolean(segment.compacting && segment.turnRunning),
@@ -507,6 +549,7 @@ export function useAgent(
         sessionID: segment.sessionId,
         messages: segment.messages.length,
         headWasLoaded,
+        authoritative,
       })
       loadedSegmentIdsRef.current.add(segment.sessionId)
       headSegmentRef.current = segment.sessionId
@@ -518,6 +561,100 @@ export function useAgent(
     },
     [advanceChain, walkChain],
   )
+
+  // healTranscript re-reads the head segment when a turn ended without this
+  // client hearing about it: the page was hidden, the socket died, or the tab
+  // came back from the back/forward cache. Without it the transcript keeps the
+  // blocks the stream left open (and never learns the final answer) until a full
+  // reload — the "spinner sits there while the dots say idle" bug.
+  const healTranscript = useCallback(
+    (reason: string) => {
+      const sid = sessionIdRef.current
+      const key = convKeyRef.current
+      const finishLocally = () => {
+        setMessages((current) => finalizeStaleBlocks(current, Date.now()))
+        setBusy(false)
+        setServerRunning(false)
+      }
+      if (healingRef.current) {
+        return
+      }
+      if (!sid) {
+        // Nothing stored to read: the turn cannot have persisted anything.
+        finishLocally()
+        return
+      }
+      healingRef.current = true
+      // No ETag on purpose: a 304 carries no body, and the body is what tells a
+      // finished turn from a transcript that is merely stale.
+      readSegment(sid)
+        .then((segment) => {
+          if (!mountedRef.current || convKeyRef.current !== key) {
+            return
+          }
+          if (segment.notModified) {
+            finishLocally()
+            return
+          }
+          setServerRunning(segment.turnRunning)
+          if (segment.turnRunning) {
+            // The turn really is still going: keep the live stream, and let the
+            // next chunk (or the next heal) finish it.
+            recordDiag('transcript.healSkipped', { reason, sessionID: sid })
+            return
+          }
+          setBusy(false)
+          applyHead(segment, true)
+          recordDiag('transcript.healed', { reason, sessionID: sid, messages: segment.messages.length })
+        })
+        .catch(() => {
+          if (!mountedRef.current || convKeyRef.current !== key) {
+            return
+          }
+          recordDiag('transcript.healFailed', { reason })
+          finishLocally()
+        })
+        .finally(() => {
+          healingRef.current = false
+        })
+    },
+    [applyHead, readSegment],
+  )
+
+  // Coming back to the page is the moment to ask two questions: is the socket
+  // still alive, and is the transcript still the truth? A hidden tab has its
+  // timers throttled and its socket may have died silently; a restored page
+  // (bfcache) never re-runs effects, so `pageshow` is the only hook it has.
+  useEffect(() => {
+    let lastReturnAt = 0
+    const onReturn = () => {
+      if (typeof document !== 'undefined' && document.visibilityState !== 'visible') {
+        return
+      }
+      // `focus` and `visibilitychange` often arrive together; one round is enough.
+      const now = Date.now()
+      if (now - lastReturnAt < 1_000) {
+        return
+      }
+      lastReturnAt = now
+      reconnectNowRef.current?.()
+      probeRef.current?.()
+      const streaming = messagesRef.current.some(isStaleStreamingBlock)
+      if (streaming || busyRef.current || serverRunningRef.current) {
+        healTranscript('visible')
+      }
+    }
+    document.addEventListener('visibilitychange', onReturn)
+    window.addEventListener('pageshow', onReturn)
+    window.addEventListener('online', onReturn)
+    window.addEventListener('focus', onReturn)
+    return () => {
+      document.removeEventListener('visibilitychange', onReturn)
+      window.removeEventListener('pageshow', onReturn)
+      window.removeEventListener('online', onReturn)
+      window.removeEventListener('focus', onReturn)
+    }
+  }, [healTranscript])
 
   const handleEvent = useCallback((event: AgentEvent) => {
     switch (event.type) {
@@ -765,15 +902,19 @@ export function useAgent(
           log.info('turn state reconciled: the server reports no running turn')
           setServerRunning(false)
           setBusy(false)
+          // The turn is over but this client may still be holding the blocks the
+          // stream left open: read the finished row and let it replace them.
+          healTranscript('reconcile')
         })
         .catch(() => {
           // Session gone (archived/deleted): nothing can still be running.
           setServerRunning(false)
           setBusy(false)
+          setMessages((current) => finalizeStaleBlocks(current, Date.now()))
         })
     }, RUNNING_RECONCILE_MS)
     return () => window.clearInterval(timer)
-  }, [busy, serverRunning])
+  }, [busy, serverRunning, healTranscript])
 
   useEffect(() => {
     if (!agentId || !token) {
@@ -788,7 +929,6 @@ export function useAgent(
       chatIdRef.current = null
       sessionIdRef.current = null
       currentAssistantIdRef.current = null
-      pendingSendsRef.current = []
       prefixCountRef.current = 0
       chainPrevRef.current = null
       chainHopsRef.current = 0
@@ -800,6 +940,10 @@ export function useAgent(
       lastChunkAtRef.current = 0
       compactionStreamingRef.current = false
       compactionDeadlineRef.current = 0
+      pendingFramesRef.current = []
+      lastInboundAtRef.current = Date.now()
+      probeSentAtRef.current = 0
+      healingRef.current = false
     }
 
     let cancelled = false
@@ -813,14 +957,40 @@ export function useAgent(
       if (cancelled || !ws || ws.readyState !== WebSocket.OPEN) {
         return
       }
-      const pending = pendingSendsRef.current
-      pendingSendsRef.current = []
+      const pending = pendingFramesRef.current
+      pendingFramesRef.current = []
       if (pending.length > 0) {
-        log.debug(`flushing ${pending.length} queued message(s)`)
+        log.debug(`flushing ${pending.length} queued frame(s)`)
       }
-      for (const { content, mode, media } of pending) {
-        ws.send(JSON.stringify({ type: 'message', content, media, metadata: { agent_mode: mode } }))
+      for (const frame of pending) {
+        ws.send(frame)
       }
+    }
+    flushRef.current = flushPending
+    const probe = () => {
+      if (cancelled || closedByEffect || !ws || ws.readyState !== WebSocket.OPEN) {
+        return
+      }
+      probeSentAtRef.current = Date.now()
+      ws.send(JSON.stringify({ type: 'ping' }))
+    }
+    probeRef.current = probe
+    // Reconnect without waiting out the backoff: used when the page comes back
+    // and the socket is already closed (the timer may have been throttled while
+    // the tab was hidden).
+    reconnectNowRef.current = () => {
+      if (cancelled || closedByEffect || !ws) {
+        return
+      }
+      if (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING) {
+        return
+      }
+      if (reconnectTimer !== null) {
+        window.clearTimeout(reconnectTimer)
+        reconnectTimer = null
+      }
+      backoff.reset()
+      connect()
     }
 
     const connect = () => {
@@ -843,6 +1013,8 @@ export function useAgent(
       ws.onopen = () => {
         opened = true
         backoff.reset()
+        lastInboundAtRef.current = Date.now()
+        probeSentAtRef.current = 0
         setConnected(true)
         setReconnecting(false)
         setError(null)
@@ -850,8 +1022,10 @@ export function useAgent(
 
         if (resumeID && loadSegmentRef.current) {
           // Read the segment the socket runs on. On a reconnect this fills in
-          // anything streamed while the client was away; the stored ETag answers
-          // 304 when nothing changed, leaving the transcript untouched.
+          // anything streamed while the client was away: the ETag avoids the
+          // transfer when the row did not move, and a row that says the turn is
+          // over (with a stale streaming block on screen) is adopted as-is —
+          // see mergeAfterTurnEnd.
           const etag = headSegmentRef.current === resumeID ? headEtagRef.current : undefined
           readSegment(resumeID, etag)
             .then((segment) => {
@@ -861,7 +1035,7 @@ export function useAgent(
               // 304: the stored row is unchanged, so the transcript (and the
               // chain state) already in memory is still right.
               if (!segment.notModified) {
-                applyHead(segment)
+                applyHead(segment, headLoadedRef.current && !segment.turnRunning)
               }
               flushPending()
             })
@@ -887,10 +1061,19 @@ export function useAgent(
       }
 
       ws.onmessage = (event) => {
+        // Any frame at all — a chunk, a completion, a pong — proves the socket
+        // is still carrying traffic.
+        lastInboundAtRef.current = Date.now()
+        probeSentAtRef.current = 0
         let data: AgentEvent
         try {
           data = JSON.parse(event.data as string) as AgentEvent
         } catch {
+          return
+        }
+        if (data.type === 'pong') {
+          // The probe answered: whatever was waiting for a live socket may go.
+          flushPending()
           return
         }
         // Only accept turn frames bound to the currently-connected conversation.
@@ -978,9 +1161,36 @@ export function useAgent(
 
     connect()
 
+    // Heartbeat: an idle socket proves itself every few seconds, and a probe
+    // that stays unanswered means the connection is dead even though the
+    // browser still reports `OPEN` (see lib/chatLiveness). Closing it is what
+    // makes the existing reconnect path run, so the next send is not written
+    // into the void — which is the "I had to refresh before I could send" bug.
+    const heartbeatTimer = window.setInterval(() => {
+      if (cancelled || closedByEffect || !ws || ws.readyState !== WebSocket.OPEN) {
+        return
+      }
+      const now = Date.now()
+      if (probeTimedOut(now, probeSentAtRef.current)) {
+        log.warn('heartbeat unanswered — dropping the connection and reconnecting')
+        recordDiag('ws.heartbeat', { verdict: 'silent' })
+        probeSentAtRef.current = 0
+        backoff.reset()
+        ws.close()
+        return
+      }
+      if (heartbeatDue(now, lastInboundAtRef.current)) {
+        probe()
+      }
+    }, 5_000)
+
     return () => {
       cancelled = true
       closedByEffect = true
+      window.clearInterval(heartbeatTimer)
+      probeRef.current = null
+      flushRef.current = null
+      reconnectNowRef.current = null
       if (reconnectTimer !== null) {
         window.clearTimeout(reconnectTimer)
       }
@@ -1009,6 +1219,33 @@ export function useAgent(
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [gatewayUrl, agentId, sessionId, handleEvent, readSegment, applyHead])
 
+  // sendFrame writes one frame, or holds it until the connection proves alive.
+  //
+  // A socket the browser still reports as OPEN may be dead (see
+  // lib/chatLiveness): writing into it loses the frame silently, which is why a
+  // stale tab used to need a refresh before anything could be sent. When the
+  // socket has been quiet for a while, the frame waits behind a probe; a pong
+  // flushes the queue, and a dead socket is closed by the heartbeat so the
+  // reconnect path runs and flushes it there.
+  const sendFrame = useCallback((frame: unknown): 'sent' | 'queued' => {
+    const ws = wsRef.current
+    const now = Date.now()
+    if (ws && ws.readyState === WebSocket.OPEN && !needsProbeBeforeSend(now, lastInboundAtRef.current)) {
+      ws.send(JSON.stringify(frame))
+      return 'sent'
+    }
+    // Bound the queue so a sustained disconnect cannot grow memory.
+    if (pendingFramesRef.current.length >= MAX_PENDING_SENDS) {
+      pendingFramesRef.current.shift()
+      log.warn(`pending queue full (${MAX_PENDING_SENDS}) — dropping oldest frame`)
+    }
+    pendingFramesRef.current.push(JSON.stringify(frame))
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      probeRef.current?.()
+    }
+    return 'queued'
+  }, [])
+
   const send = useCallback((content: string, mode: AgentMode = 'build', media: ChatMediaItem[] = []) => {
     const trimmed = content.trim()
     if (!trimmed && media.length === 0) {
@@ -1016,7 +1253,7 @@ export function useAgent(
     }
     setBusy(true)
     // The bubble appears immediately in both cases: a message typed while the
-    // socket is down is queued for the reconnect, but the user must still see
+    // socket is down (or slow to answer) is queued, but the user must still see
     // that it was accepted.
     setMessages((current) => [
       ...current,
@@ -1029,17 +1266,8 @@ export function useAgent(
         pending: true,
       },
     ])
-    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-      wsRef.current.send(JSON.stringify({ type: 'message', content: trimmed, media, metadata: { agent_mode: mode } }))
-      return
-    }
-    // Bound the offline queue so sustained disconnects cannot grow memory.
-    if (pendingSendsRef.current.length >= MAX_PENDING_SENDS) {
-      pendingSendsRef.current.shift()
-      log.warn(`pending queue full (${MAX_PENDING_SENDS}) — dropping oldest message`)
-    }
-    pendingSendsRef.current.push({ content: trimmed, mode, media })
-  }, [])
+    sendFrame({ type: 'message', content: trimmed, media, metadata: { agent_mode: mode } })
+  }, [sendFrame])
 
   const clear = useCallback(() => {
     setMessages([])
@@ -1049,21 +1277,15 @@ export function useAgent(
   // sendCommand sends a slash-command (e.g. /compact) without appending a user
   // bubble; the agent replies with a completion.
   const sendCommand = useCallback((command: string) => {
-    if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
-      return
-    }
     setBusy(true)
-    wsRef.current.send(JSON.stringify({ type: 'message', content: command }))
-  }, [])
+    sendFrame({ type: 'message', content: command })
+  }, [sendFrame])
 
   // stop aborts the agent's in-flight turn for this session. No bubble is
   // appended; the turn completes with a "stopped" marker.
   const stop = useCallback(() => {
-    if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
-      return
-    }
-    wsRef.current.send(JSON.stringify({ type: 'message', content: '/stop' }))
-  }, [])
+    sendFrame({ type: 'message', content: '/stop' })
+  }, [sendFrame])
 
   // answerQuestion sends the user's answer for the pending blocking question.
   // The answer carries metadata.question_id so the agent routes it to the
@@ -1071,16 +1293,14 @@ export function useAgent(
   const answerQuestion = useCallback(
     (answers: string[]) => {
       const q = pendingQuestion
-      if (!q || !wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
+      if (!q) {
         return
       }
-      wsRef.current.send(
-        JSON.stringify({ type: 'message', content: answers.join('\n'), metadata: { question_id: q.id, answers } }),
-      )
+      sendFrame({ type: 'message', content: answers.join('\n'), metadata: { question_id: q.id, answers } })
       setPendingQuestion(null)
       setBusy(true)
     },
-    [pendingQuestion],
+    [pendingQuestion, sendFrame],
   )
 
   // answerApproval sends the user's decision for a pending permission prompt.
@@ -1089,16 +1309,14 @@ export function useAgent(
   const answerApproval = useCallback(
     (decision: PermissionDecision) => {
       const a = pendingApproval
-      if (!a || !wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
+      if (!a) {
         return
       }
-      wsRef.current.send(
-        JSON.stringify({ type: 'message', content: decision, metadata: { approval_id: a.id, decision } }),
-      )
+      sendFrame({ type: 'message', content: decision, metadata: { approval_id: a.id, decision } })
       setPendingApproval(null)
       setBusy(true)
     },
-    [pendingApproval],
+    [pendingApproval, sendFrame],
   )
 
   // loadOlder is the scroll-up affordance. The background walk normally has the

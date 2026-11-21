@@ -4,6 +4,7 @@
 // a socket: the hook owns the connection and the loading state, this module owns
 // what a merge *means*.
 import type { AgentMessage } from './useAgent'
+import { finalizeStaleBlocks, isStaleStreamingBlock } from './liveMessages'
 
 /** Whether a transcript entry is an unconfirmed (optimistic) user message. */
 export function isPendingUser(message: AgentMessage): message is Extract<AgentMessage, { role: 'user' }> {
@@ -107,6 +108,62 @@ export function mergeSegment(
  */
 export function prependSegment(current: AgentMessage[], older: AgentMessage[]): AgentMessage[] {
   return [...older, ...current]
+}
+
+/** The answer text of the assistant content blocks, concatenated. */
+function answerText(messages: AgentMessage[]): string {
+  return messages
+    .filter((m) => m.role === 'assistant' && m.kind === 'content')
+    .map((m) => m.content)
+    .join('')
+}
+
+/**
+ * Whether the stored row already contains everything the stream showed.
+ *
+ * Only the answer text is compared: thought and tool blocks are shaped
+ * differently in the two views ([tool_group] vs. the provider's call/result
+ * messages), so a shape comparison would never hold. The answer is the part a
+ * reader would notice going missing.
+ */
+export function persistedCoversStream(persisted: AgentMessage[], live: AgentMessage[]): boolean {
+  const streamed = answerText(live).trim()
+  if (streamed === '') {
+    return true
+  }
+  return answerText(persisted).includes(streamed)
+}
+
+/**
+ * The merge for a turn that is already over (the server says so): the stored row
+ * is the finished turn, and the blocks the stream left open are leftovers.
+ *
+ * `mergeSegment` deliberately refuses to replace a transcript that still has a
+ * streaming block, because mid-turn the row lags the stream. That rule is exactly
+ * wrong once the turn has ended without a `complete` frame: the row carries the
+ * whole answer, the leftover blocks spin forever and a re-read changes nothing.
+ *
+ * Three cases:
+ * - nothing stale is on screen → the ordinary merge;
+ * - the row covers the streamed answer → adopt the row (drops the leftovers);
+ * - the row lags the stream (an agent that died mid-turn) → keep what the reader
+ *   already saw, but close it, so nothing keeps spinning.
+ */
+export function mergeAfterTurnEnd(
+  current: AgentMessage[],
+  persisted: AgentMessage[],
+  prefixCount: number,
+  at: number = Date.now(),
+): AgentMessage[] {
+  const prefix = current.slice(0, prefixCount)
+  const tail = current.slice(prefixCount)
+  if (!tail.some(isStaleStreamingBlock)) {
+    return [...prefix, ...persisted, ...reconcilePending(tail, persisted).filter(isPendingUser)]
+  }
+  if (persistedCoversStream(persisted, tail)) {
+    return [...prefix, ...persisted, ...reconcilePending(tail, persisted).filter(isPendingUser)]
+  }
+  return [...prefix, ...finalizeStaleBlocks(mergeLiveOntoHistory(persisted, tail), at)]
 }
 
 export type ChainState = {

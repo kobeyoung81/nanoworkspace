@@ -28,6 +28,8 @@ export type AgentEvent =
   | { type: 'chunk'; chat_id: string; agent_id?: string; message_id?: string; kind?: ChunkKind; content: string }
   | { type: 'complete'; chat_id: string; agent_id?: string; message_id?: string; session_id?: string; content: string; summary?: string; error?: string; error_detail?: string }
   | { type: 'error'; error: string }
+  /** Answer to the client's liveness probe (`{"type":"ping"}`). */
+  | { type: 'pong' }
 
 // GATEWAY_URL points at the gateway web channel. When empty (the default), the
 // portal's nginx proxies the gateway under the same origin, so no per-host
