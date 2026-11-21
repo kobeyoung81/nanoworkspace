@@ -108,6 +108,7 @@ import {
 import { compactThresholdPct } from '../lib/contextRing'
 import { GoalDraft } from '../components/goal/GoalDraft'
 import { GoalCreateBar, GoalSplitCard } from '../components/goal/GoalCreate'
+import { createDraft, type DraftView } from '../lib/goalApi'
 import { GoalBanner } from '../components/goal/GoalBanner'
 import { TasksPanel } from '../components/tasks/TasksPanel'
 import { conversationModeOf, defaultModeOf, resolveAgentMode } from '../lib/agentMode'
@@ -3346,7 +3347,7 @@ function Composer({
   const { selected } = useWorkbench()
   // active says whether this conversation is the one on screen: every open tab
   // stays mounted, so it is what keeps a shortcut press out of the other tabs.
-  const { sendCommand, stop, busy, serverRunning, active } = useChatWorkbench()
+  const { sendCommand, send, stop, busy, serverRunning, active } = useChatWorkbench()
   // The goal card is a server-backed draft, so it needs the conversation's base
   // key: that is what the scheduler will dispatch rounds into.
   const { activeConversationKey, selectedAgent } = useWorkbench()
@@ -3356,11 +3357,31 @@ function Composer({
   const [goalStage, setGoalStage] = useState<'none' | 'split' | 'create' | 'confirm'>('none')
   const [goalPlanRef, setGoalPlanRef] = useState<string | undefined>(undefined)
   const [goalDescription, setGoalDescription] = useState('')
+  const [goalInitial, setGoalInitial] = useState<DraftView | undefined>(undefined)
   const activeSession = useActiveConversation()
+
+  // The intake turn: a normal conversation message (no `source: goal`), so the
+  // blocking question tool works — nobody is "away". It names the draft and what
+  // is missing; the answers come back through goal_intake_answer.
+  const startIntake = useCallback(
+    (view: DraftView) => {
+      const missing = view.verdict?.missing ?? []
+      if (missing.length === 0) return
+      const labels = missing.map((m) => t(`goal.check.${m}`, { defaultValue: m })).join('、')
+      send(
+        `【长程目标 · 补齐】草稿 ${view.draft.id} 还差：${labels}。\n` +
+          '请用 question 工具一次问最多 3 个问题来补齐（每题第一项标「推荐」并给一行理由，允许「其他」）。\n' +
+          `每得到一条回答就调用 goal_intake_answer（draft_id=${view.draft.id}，check 为对应项，value 为用户原话）。\n` +
+          '六项齐全后回一句「可以确认了」，然后在对话里等我确认。',
+      )
+    },
+    [send, t],
+  )
 
   const openGoalFlow = useCallback(async () => {
     setGoalPlanRef(undefined)
     setGoalDescription('')
+    setGoalInitial(undefined)
     let planPath: string | undefined
     if (activeSession.id) {
       try {
@@ -3717,6 +3738,16 @@ function Composer({
               onSubmit={(description) => {
                 setGoalDescription(description)
                 setGoalStage('confirm')
+                // Create the draft here (not inside the card) so the intake turn
+                // and the card talk about the same object.
+                void createDraft(selectedAgent, activeConversationKey ?? '', undefined, description)
+                  .then((view) => {
+                    setGoalInitial(view)
+                    startIntake(view)
+                  })
+                  .catch(() => {
+                    // The card creates its own draft if this fails.
+                  })
               }}
             />
           ) : null}
@@ -3726,6 +3757,7 @@ function Composer({
               sessionKey={activeConversationKey}
               planRef={goalPlanRef}
               initialCondition={goalDescription}
+              initial={goalInitial}
               onClose={() => setGoalStage('none')}
               onStarted={() => setGoalStage('none')}
             />

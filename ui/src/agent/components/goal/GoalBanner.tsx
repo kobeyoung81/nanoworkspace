@@ -14,7 +14,6 @@ import { Button } from '../ui/button'
 import {
   cancelGoal,
   goalIsActive,
-  goalStatusLabel,
   listGoalsForSession,
   pauseGoal,
   resumeGoal,
@@ -70,6 +69,10 @@ export function GoalBanner({ sessionKey }: Props) {
     return null
   }
 
+  const minutes = goal.started_at
+    ? Math.max(0, Math.round((Date.now() - new Date(goal.started_at).getTime()) / 60000))
+    : 0
+
   const act = async (fn: (id: string) => Promise<unknown>) => {
     setBusy(true)
     try {
@@ -88,8 +91,32 @@ export function GoalBanner({ sessionKey }: Props) {
     <div className="border-b bg-muted/30 px-3 py-1.5 text-xs" data-goal-banner={goal.status}>
       <div className="flex flex-wrap items-center gap-2">
         <Target className="size-3.5 shrink-0 text-primary" />
+        {/* The four states and their wording are product §5.9; the icons are the
+            placeholders from that table. */}
         <span className="font-medium" data-goal-banner-status>
-          {goalStatusLabel(goal)}
+          {goal.status === 'running' || goal.status === 'verifying'
+            ? t('goal.bar.running', {
+                defaultValue: '目标进行中 · 第 {{round}}/{{max}} 轮 · {{minutes}} 分钟',
+                round: goal.round + 1,
+                max: goal.max_rounds,
+                minutes,
+              })
+            : goal.status === 'paused'
+              ? t('goal.bar.paused', { defaultValue: '已暂停 · {{reason}}', reason: goal.status_reason || '—' })
+              : goal.status === 'cancelling'
+                ? t('goal.bar.cancelling', { defaultValue: '正在停止…' })
+                : goal.status === 'achieved'
+                  ? t('goal.bar.achieved', {
+                      defaultValue: '已达成 · {{round}} 轮 · {{minutes}} 分钟',
+                      round: goal.result?.rounds ?? goal.round,
+                      minutes: goal.result?.minutes ?? minutes,
+                    })
+                  : goal.status === 'failed'
+                    ? t('goal.bar.failed', { defaultValue: '未达成 · {{reason}}', reason: goal.status_reason || '—' })
+                    : t('goal.bar.cancelled', {
+                        defaultValue: '已叫停 · 完成 {{round}} 轮',
+                        round: goal.round,
+                      })}
         </span>
         <span className="truncate text-muted-foreground" title={goal.condition}>
           {goal.title || goal.condition}

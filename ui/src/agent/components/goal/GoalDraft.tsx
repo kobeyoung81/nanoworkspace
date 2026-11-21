@@ -18,6 +18,8 @@ type Props = {
   planRef?: string
   /** The sentence typed in the description state; written as the condition. */
   initialCondition?: string
+  /** A draft the caller already created (so the intake turn and the card agree). */
+  initial?: DraftView
   onClose: () => void
   onStarted: (goal: Goal) => void
 }
@@ -83,7 +85,7 @@ function Row({
   )
 }
 
-export function GoalDraft({ agentId, sessionKey, planRef, initialCondition, onClose, onStarted }: Props) {
+export function GoalDraft({ agentId, sessionKey, planRef, initialCondition, initial, onClose, onStarted }: Props) {
   const { t } = useTranslation()
   const [view, setView] = useState<DraftView | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -91,6 +93,10 @@ export function GoalDraft({ agentId, sessionKey, planRef, initialCondition, onCl
   const [editing, setEditing] = useState<string | null>(null)
 
   useEffect(() => {
+    if (initial) {
+      setView(initial)
+      return
+    }
     let cancelled = false
     createDraft(agentId, sessionKey, planRef)
       .then(async (v) => {
@@ -112,7 +118,7 @@ export function GoalDraft({ agentId, sessionKey, planRef, initialCondition, onCl
     return () => {
       cancelled = true
     }
-  }, [agentId, sessionKey, planRef, initialCondition])
+  }, [agentId, sessionKey, planRef, initialCondition, initial])
 
   const answer = useCallback(
     async (check: string, value: string) => {

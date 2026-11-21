@@ -53,6 +53,9 @@ type draftPatch struct {
 type draftAnswer struct {
 	Check string `json:"check"`
 	Value string `json:"value"`
+	// UserID is only honoured on an internal call (the intake turn has no
+	// browser token and writes on behalf of the conversation's owner).
+	UserID string `json:"user_id,omitempty"`
 }
 
 // draftView is what the card renders: the draft plus the six-check verdict.
@@ -193,13 +196,15 @@ func (s *Server) handleDraftPatch(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleDraftAnswer(w http.ResponseWriter, r *http.Request) {
-	g, ok := s.loadDraft(w, r)
-	if !ok {
-		return
-	}
 	var a draftAnswer
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 64<<10)).Decode(&a); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request body"})
+		return
+	}
+	// The intake turn runs in the agent container and writes the answers back, so
+	// this endpoint accepts the internal token as well as a browser session.
+	g, ok := s.loadDraftFor(w, r, strings.TrimSpace(a.UserID))
+	if !ok {
 		return
 	}
 	value := strings.TrimSpace(a.Value)
@@ -419,15 +424,27 @@ func firstNonEmpty(values ...string) string {
 
 // loadDraft resolves the caller's draft (or refuses).
 func (s *Server) loadDraft(w http.ResponseWriter, r *http.Request) (*store.Goal, bool) {
+	return s.loadDraftFor(w, r, "")
+}
+
+// loadDraftFor is loadDraft with an owner supplied by an internal caller.
+func (s *Server) loadDraftFor(w http.ResponseWriter, r *http.Request, internalUserID string) (*store.Goal, bool) {
 	if !s.goalsReady(w) {
 		return nil, false
 	}
-	identity, ok := auth.FromContext(r.Context())
-	if !ok {
-		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+	userID := internalUserID
+	if userID == "" {
+		identity, ok := auth.FromContext(r.Context())
+		if !ok {
+			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+			return nil, false
+		}
+		userID = identity.UserID
+	} else if !isInternalCall(r) {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "a user id is only accepted on an internal call"})
 		return nil, false
 	}
-	g, err := s.goals.Get(r.Context(), identity.UserID, r.PathValue("id"))
+	g, err := s.goals.Get(r.Context(), userID, r.PathValue("id"))
 	if err != nil {
 		s.writeGoalError(w, err)
 		return nil, false

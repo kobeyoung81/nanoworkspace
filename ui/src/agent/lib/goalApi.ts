@@ -63,10 +63,21 @@ function base(): string {
 }
 
 /** createDraft opens (or returns) the conversation's unfinished draft. */
-export function createDraft(agentId: string, sessionKey: string, planRef?: string): Promise<DraftView> {
+export function createDraft(
+  agentId: string,
+  sessionKey: string,
+  planRef?: string,
+  condition?: string,
+): Promise<DraftView> {
   return getHost().api.post<DraftView>(
     '/goals/drafts',
-    { agent_id: agentId, session_key: sessionKey, origin: planRef ? 'plan' : 'manual', plan_ref: planRef },
+    {
+      agent_id: agentId,
+      session_key: sessionKey,
+      origin: planRef ? 'plan' : 'manual',
+      plan_ref: planRef,
+      condition,
+    },
     base(),
   )
 }
