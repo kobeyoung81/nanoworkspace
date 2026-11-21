@@ -2860,7 +2860,7 @@ function AgentWindow({
 
   return (
     <div ref={paneRef} className="flex h-full min-h-0 flex-col">
-      {activeConversationKey ? <GoalBanner sessionKey={activeConversationKey} /> : null}
+      {activeConversationKey ? <GoalBanner sessionKey={activeConversationKey} messages={messages} /> : null}
       <div className="relative min-h-0 flex-1">
         {laidOut ? (
           groups.length === 0 ? (
@@ -2950,6 +2950,7 @@ function AgentWindow({
         onModeChange={onModeChange}
         agentId={agentId}
         applySuggestionRef={applySuggestionRef}
+        goalRunning={goalActive}
       />
     </div>
   )
@@ -3362,6 +3363,7 @@ function Composer({
   onModeChange,
   agentId,
   applySuggestionRef,
+  goalRunning,
 }: {
   connected: boolean
   reconnecting: boolean
@@ -3371,6 +3373,7 @@ function Composer({
   onModeChange: (mode: AgentMode) => void
   agentId: string | null
   applySuggestionRef: React.MutableRefObject<((value: string) => void) | null>
+  goalRunning?: boolean
 }) {
   const [draft, setDraft] = useState('')
   const [attachments, setAttachments] = useState<ChatMediaItem[]>([])
@@ -3899,6 +3902,19 @@ function Composer({
               aside while a dictation is live: the row becomes the recording
               strip. Only the microphone stays mounted — it owns the pointer
               capture that keeps the hold gesture alive. */}
+          {/* Creating or running a goal, the capsule changes subject: it is not
+              "build or plan is unavailable", it is "this is not yours to pick"
+              (product §5.2). */}
+          {goalStage !== 'none' || goalRunning ? (
+            <span
+              data-mode-lock={goalStage !== 'none' ? 'draft' : 'running'}
+              className="flex h-8 items-center rounded-full border border-dashed px-2.5 text-xs text-muted-foreground"
+            >
+              ◎ {goalStage !== 'none'
+                ? t('goal.mode.draft', { defaultValue: '长程目标' })
+                : t('goal.mode.running', { defaultValue: '目标执行中' })}
+            </span>
+          ) : null}
           <div
             role="group"
             aria-label={t('agent.modeToggle')}
@@ -3907,6 +3923,7 @@ function Composer({
               'flex h-9 items-center gap-0.5 rounded-full border bg-muted/50 p-0.5 shadow-sm',
               MODE_GROUP_TIER_CLASS[tier],
               voiceActive && 'hidden',
+              (goalStage !== 'none' || goalRunning) && 'hidden',
             )}
           >
             <button
@@ -4019,7 +4036,7 @@ function Composer({
                 onClick={onMicClick}
               />
             ) : trailing === 'stop-turn' ? (
-              <StopButton onStop={stop} />
+              <StopButton onStop={stop} goalRunning={goalRunning} />
             ) : trailing === 'spinner' ? (
               <Button
                 type="button"
@@ -4169,15 +4186,20 @@ function SendButton({ canSend, hasContent }: { canSend: boolean; hasContent: boo
 }
 
 // StopButton aborts the agent's in-flight turn.
-function StopButton({ onStop }: { onStop: () => void }) {
+function StopButton({ onStop, goalRunning }: { onStop: () => void; goalRunning?: boolean }) {
   const { t } = useTranslation()
+  // With a goal running the red button stops this round *and* parks the goal, and
+  // the tooltip says so (product §5.9: the sentence is not to be reworded).
+  const label = goalRunning
+    ? t('goal.stop.hover', { defaultValue: '停止本轮，目标将暂停' })
+    : t('common.stop')
   return (
     <Button
       type="button"
       size="icon"
       variant="destructive"
-      aria-label={t('common.stop')}
-      title={t('common.stop')}
+      aria-label={label}
+      title={label}
       onClick={onStop}
       className="shrink-0 rounded-full"
     >

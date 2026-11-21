@@ -12,6 +12,7 @@ import { AlertTriangle, ChevronDown, ChevronUp, CirclePause, CirclePlay, Target,
 import { cn } from '../../lib/utils'
 import { Button } from '../ui/button'
 import { GoalEndCard } from './GoalEndCard'
+import { GoalRoundCard, reportFor } from './GoalRoundCard'
 import {
   cancelGoal,
   goalIsActive,
@@ -26,10 +27,12 @@ const POLL_MS = 5000
 
 type Props = {
   sessionKey: string
+  // The transcript, so a round card can show that round's own report.
+  messages?: ReadonlyArray<{ role: string; kind?: string; tools?: { name: string; args: string; result: string }[] }>
 }
 
 /** GoalBanner shows the newest goal of this conversation. */
-export function GoalBanner({ sessionKey }: Props) {
+export function GoalBanner({ sessionKey, messages }: Props) {
   const { t } = useTranslation()
   const [goals, setGoals] = useState<Goal[] | null>(null)
   const [open, setOpen] = useState(false)
@@ -203,19 +206,9 @@ export function GoalBanner({ sessionKey }: Props) {
           {(goal.rounds ?? []).length === 0 ? (
             <div className="text-muted-foreground">{t('goal.banner.noRounds', { defaultValue: '还没有轮次' })}</div>
           ) : (
-            <ol className="space-y-0.5">
+            <ol className="space-y-1">
               {(goal.rounds ?? []).slice(-8).map((r) => (
-                <li key={`${r.n}-${r.at}`} className="flex items-center gap-2">
-                  <span className="w-10 shrink-0 text-muted-foreground">#{r.n + 1}</span>
-                  <span
-                    className={cn(
-                      r.verdict === 'met' ? 'text-emerald-600' : r.verdict === 'impossible' ? 'text-destructive' : 'text-amber-600',
-                    )}
-                  >
-                    {r.verdict}
-                  </span>
-                  {r.files ? <span className="text-muted-foreground">{r.files} 个文件</span> : null}
-                </li>
+                <GoalRoundCard key={`${r.n}-${r.at}`} round={r} entry={reportFor(messages ?? [], r.n)} />
               ))}
             </ol>
           )}
