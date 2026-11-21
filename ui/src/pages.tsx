@@ -1,3 +1,5 @@
+// The module's own utilities; see the note in styles.css.
+import './styles.css'
 // The pages this module contributes to the portal.
 //
 // `/files` and `/files/view` are the file browser and the standalone preview. The

@@ -1,3 +1,5 @@
+// The module's own utilities; see the note in styles.css.
+import './styles.css'
 // The panel this application contributes to the portal's workbench.
 //
 // It is the git browser: the repository state, the file tree, the staging area and

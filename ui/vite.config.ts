@@ -1,18 +1,25 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
+import tailwindcss from '@tailwindcss/vite'
 import { federation } from '@module-federation/vite'
 
 // The workspace module's front end.
 //
 // It has no document of its own: the portal's shell loads it at runtime from
-// /plugins/workspace/ and renders it inside its own React tree. React therefore comes
-// from the host (`import: false`), and the stylesheet is the shell's — the page
-// composes the shell's components through its context instead of shipping a second
-// design system.
+// /plugins/workspace/ and renders it inside its own React tree, so React comes
+// from the host (`import: false`).
+//
+// Styles are the plugin's own Tailwind build (src/styles.css). They have to be:
+// the shell's Tailwind scans the shell's sources, so any utility only this module
+// uses was never emitted — the chat's page-height class was one of them, and its
+// absence is what pushed the composer out of the window once the shell stopped
+// carrying a copy of the chat. The palette itself still comes from the shell's
+// `:root` variables, so both halves of a screen share one theme.
 export default defineConfig({
   base: '/plugins/workspace/',
   plugins: [
     react(),
+    tailwindcss(),
     federation({
       name: 'workspace',
       filename: 'remoteEntry.js',

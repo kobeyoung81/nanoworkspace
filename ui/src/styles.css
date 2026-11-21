@@ -1,0 +1,64 @@
+/*
+ * The workspace module's own Tailwind build.
+ *
+ * The plugin is rendered inside the portal's tree, so the shell's stylesheet is
+ * on the page and provides the palette (`:root` variables) and the base rules.
+ * What the shell cannot provide is the *utilities*: its Tailwind scans the
+ * shell's own sources, so a class that only this module uses was never emitted.
+ * That stayed invisible while the shell carried a copy of the chat (the copy kept
+ * the classes alive); once it was deleted, the chat's page-height class and every
+ * other plugin-only utility disappeared, and the workbench grew past the window.
+ *
+ * Importing the theme/utilities layers (and not preflight) keeps the shell's base
+ * styles in charge: no second reset, no duplicated body typography. The colour
+ * mappings below mirror `nanoportal/web/src/index.css`, so a class means the same
+ * thing in both halves of a screen.
+ */
+@layer theme, base, components, utilities;
+@import 'tailwindcss/theme.css' layer(theme);
+@import 'tailwindcss/utilities.css' layer(utilities);
+
+@plugin "@tailwindcss/typography";
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-success: var(--success);
+  --color-warning: var(--warning);
+  --color-warning-foreground: var(--warning-foreground);
+  --color-danger: var(--danger);
+  --color-info: var(--info);
+  --color-user-message: var(--user-message-bg);
+  --color-user-message-foreground: var(--user-message-fg);
+  --color-user-message-border: var(--user-message-border);
+  --color-surface-2: var(--surface-2);
+  --color-surface-3: var(--surface-3);
+  --color-border-subtle: var(--border-subtle);
+  --color-border-strong: var(--border-strong);
+  --color-primary-weak: var(--primary-weak);
+  --color-sidebar: var(--sidebar);
+  --color-chart-bar: var(--chart-bar);
+
+  --radius-sm: var(--ui-radius-sm);
+  --radius-md: var(--ui-radius-md);
+  --radius-lg: var(--ui-radius-lg);
+  --radius-xl: var(--ui-radius-xl);
+}
