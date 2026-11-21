@@ -33,6 +33,9 @@ type Config struct {
 	// InternalToken authenticates this service to the portal, the provisioner
 	// and the bus. Empty means every call fails rather than travelling unauthenticated.
 	InternalToken string
+	// AdminURL is the admin module's base URL (NANOSEC_ADMIN_URL). The goal
+	// switch is read from its agent component; configuration belongs there.
+	AdminURL string
 	// MongoURI names the database this module owns (NANOSEC_WORKSPACE_MONGO_URI).
 	// The database name is part of the URI; a deployment that omits it fails at
 	// start-up instead of quietly writing into "test".
@@ -50,6 +53,7 @@ func Load() Config {
 		UIDir:          env("NANOSEC_WORKSPACE_UI_DIR", "/app/ui"),
 		InternalToken:  os.Getenv("NANOSEC_BUS_INTERNAL_TOKEN"),
 		MongoURI:       strings.TrimSpace(os.Getenv("NANOSEC_WORKSPACE_MONGO_URI")),
+		AdminURL:       env("NANOSEC_ADMIN_URL", "http://nanoadmin:8080"),
 	}
 }
 

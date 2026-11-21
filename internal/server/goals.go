@@ -22,9 +22,10 @@ import (
 //
 // It is a setter rather than a New parameter so the file and git surface keeps
 // working (and testing) without a database.
-func (s *Server) SetGoals(st *store.Store, internalToken string) {
+func (s *Server) SetGoals(st *store.Store, internalToken string, verify bool) {
 	s.goals = st
 	s.internalToken = internalToken
+	s.goalVerify = verify
 }
 
 // registerGoalRoutes mounts the goal surface under one prefix.

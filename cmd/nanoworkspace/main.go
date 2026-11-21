@@ -19,7 +19,10 @@ import (
 
 	"gitee.com/kobeyoung81/nanoworkspace/internal/agents"
 	"gitee.com/kobeyoung81/nanoworkspace/internal/auth"
+	"gitee.com/kobeyoung81/nanoworkspace/internal/bus"
 	"gitee.com/kobeyoung81/nanoworkspace/internal/config"
+	"gitee.com/kobeyoung81/nanoworkspace/internal/engine"
+	"gitee.com/kobeyoung81/nanoworkspace/internal/goal"
 	"gitee.com/kobeyoung81/nanoworkspace/internal/server"
 	"gitee.com/kobeyoung81/nanoworkspace/internal/store"
 	"gitee.com/kobeyoung81/nanoworkspace/internal/tunnel"
@@ -111,19 +114,31 @@ func serve() error {
 
 	slog.Info("starting nanoworkspace", "addr", cfg.Addr, "portal", cfg.PortalURL, "provisioner", cfg.ProvisionerURL)
 
+	tunnels := tunnel.New(cfg.ProvisionerURL, cfg.BusURL, cfg.InternalToken)
 	srv := server.New(
 		cfg.Addr,
 		auth.NewValidator(cfg.JWKSURL),
 		agents.New(cfg.PortalURL, cfg.InternalToken),
-		tunnel.New(cfg.ProvisionerURL, cfg.BusURL, cfg.InternalToken),
+		tunnels,
 		cfg.UIDir,
 	)
+	srv.SetGoals(st, cfg.InternalToken, true)
+
+	// The goal loop: one ticker per deployment. Two replicas would both claim
+	// rounds; the claim makes that safe rather than "only one instance runs".
+	eng := engine.New(st, bus.New(cfg.BusURL, cfg.InternalToken),
+		goal.NewEnabled(cfg.AdminURL, cfg.InternalToken), engine.DefaultConfig())
+	eng.Plan = engine.TunnelPlanReader{Tunnels: tunnels, MaxLines: 60}
+	runCtx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go eng.Run(runCtx)
 
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 	go func() {
 		sig := <-sigCh
 		slog.Info("shutting down", "signal", sig)
+		cancel()
 		_ = srv.Shutdown()
 	}()
 
