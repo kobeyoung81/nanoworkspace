@@ -1,0 +1,33 @@
+{
+  "collections": {
+    "workspace_goals": {
+      "indexes": [
+        {
+          "name": "agent_status_updated",
+          "keys": [["agent_id", 1], ["status", 1], ["updated_at", -1]]
+        },
+        {
+          "name": "status_next_round",
+          "keys": [["status", 1], ["next_round_at", 1]]
+        },
+        {
+          "name": "user_status",
+          "keys": [["user_id", 1], ["status", 1]]
+        },
+        {
+          "name": "session_key",
+          "keys": [["session_key", 1]]
+        },
+        {
+          "name": "user_id_unique",
+          "keys": [["user_id", 1], ["id", 1]],
+          "unique": true
+        },
+        {
+          "name": "user_status_updated",
+          "keys": [["user_id", 1], ["status", 1], ["updated_at", -1]]
+        }
+      ]
+    }
+  }
+}

@@ -1,8 +1,9 @@
 // Package config reads nanoworkspace's settings from the environment.
 //
-// The service is stateless: it holds no database and no files. Everything it
-// answers is either a fact it asks another module (who owns this agent) or a
-// request it puts on a container's tunnel.
+// The service owns one database: workspace_goals, the long-running goal rows.
+// Everything else it answers is either a fact it asks another module (who owns
+// this agent) or a request it puts on a container's tunnel — the conversation,
+// the evidence and the files stay where they already live.
 package config
 
 import (
@@ -32,6 +33,10 @@ type Config struct {
 	// InternalToken authenticates this service to the portal, the provisioner
 	// and the bus. Empty means every call fails rather than travelling unauthenticated.
 	InternalToken string
+	// MongoURI names the database this module owns (NANOSEC_WORKSPACE_MONGO_URI).
+	// The database name is part of the URI; a deployment that omits it fails at
+	// start-up instead of quietly writing into "test".
+	MongoURI string
 }
 
 // Load reads the configuration from the environment.
@@ -44,6 +49,7 @@ func Load() Config {
 		BusURL:         env("NANOSEC_BUS_URL", "http://nanobus:9000"),
 		UIDir:          env("NANOSEC_WORKSPACE_UI_DIR", "/app/ui"),
 		InternalToken:  os.Getenv("NANOSEC_BUS_INTERNAL_TOKEN"),
+		MongoURI:       strings.TrimSpace(os.Getenv("NANOSEC_WORKSPACE_MONGO_URI")),
 	}
 }
 
