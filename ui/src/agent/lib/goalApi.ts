@@ -28,6 +28,7 @@ export type Goal = {
   user_id: string
   agent_id: string
   session_key: string
+  chat_id?: string
   origin?: string
   title?: string
   condition?: string

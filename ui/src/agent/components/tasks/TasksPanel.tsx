@@ -131,7 +131,6 @@ function Row({
 // The workbench mounts a panel with its own context and no props, so the panel
 // reads what it needs from the workbench itself.
 export function TasksPanel(_props?: { ctx?: unknown; onOpenGoal?: (goal: Goal) => void }) {
-  const onOpenGoal = _props?.onOpenGoal
   const { t } = useTranslation()
   const [goals, setGoals] = useState<Goal[] | null>(null)
   const [filter, setFilter] = useState<Filter>('running')
@@ -139,7 +138,24 @@ export function TasksPanel(_props?: { ctx?: unknown; onOpenGoal?: (goal: Goal) =
 
   // The scheduled-task half is read-only (see the note in cron.go): the agent's
   // cron service owns cron.json, so the panel lists what it has scheduled.
-  const { selectedAgent } = useWorkbench()
+  const { selectedAgent, selectAgent, selectSession, sessionLists, ops } = useWorkbench()
+
+  // Opening a goal means opening its conversation: pick the agent, then the
+  // segment whose chat id the goal is bound to, then bring the chat forward.
+  const openGoal = useCallback(
+    (goal: Goal) => {
+      selectAgent(goal.agent_id)
+      const entry = sessionLists[goal.agent_id]
+      const hit =
+        entry?.rows.find((row) => row.chat_id === goal.chat_id) ??
+        entry?.rows.find((row) => row.id.startsWith(goal.session_key))
+      if (hit) {
+        selectSession(hit.id)
+      }
+      ops.openPanel('chat')
+    },
+    [selectAgent, selectSession, sessionLists, ops],
+  )
   const [cronTasks, setCronTasks] = useState<CronTask[]>([])
   useEffect(() => {
     if (!selectedAgent) {
@@ -264,7 +280,7 @@ export function TasksPanel(_props?: { ctx?: unknown; onOpenGoal?: (goal: Goal) =
       ) : (
         <ul className="min-h-0 flex-1 overflow-y-auto">
           {visible.map((g) => (
-            <Row key={g.id} goal={g} onAct={act} onOpen={(goal) => onOpenGoal?.(goal)} busy={busy} />
+            <Row key={g.id} goal={g} onAct={act} onOpen={openGoal} busy={busy} />
           ))}
         </ul>
       )}

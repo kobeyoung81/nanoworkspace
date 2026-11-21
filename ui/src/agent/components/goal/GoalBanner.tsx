@@ -12,6 +12,7 @@ import { AlertTriangle, ChevronDown, ChevronUp, CirclePause, CirclePlay, Target,
 import { cn } from '../../lib/utils'
 import { Button } from '../ui/button'
 import { GoalEndCard } from './GoalEndCard'
+import { GoalConfirmSheet, type ConfirmKind } from './GoalConfirmSheet'
 import { GoalRoundCard, reportFor } from './GoalRoundCard'
 import {
   cancelGoal,
@@ -37,6 +38,7 @@ export function GoalBanner({ sessionKey, messages }: Props) {
   const [goals, setGoals] = useState<Goal[] | null>(null)
   const [open, setOpen] = useState(false)
   const [busy, setBusy] = useState(false)
+  const [confirming, setConfirming] = useState<ConfirmKind | null>(null)
 
   const refresh = useCallback(async () => {
     try {
@@ -152,7 +154,7 @@ export function GoalBanner({ sessionKey, messages }: Props) {
               variant="ghost"
               className="h-6 px-1.5"
               disabled={busy}
-              onClick={() => act(pauseGoal)}
+              onClick={() => setConfirming('pause')}
               data-goal-action="pause"
             >
               <CirclePause className="size-3.5" />
@@ -178,7 +180,7 @@ export function GoalBanner({ sessionKey, messages }: Props) {
               variant="ghost"
               className="h-6 px-1.5 text-destructive hover:text-destructive"
               disabled={busy}
-              onClick={() => act(cancelGoal)}
+              onClick={() => setConfirming('cancel')}
               data-goal-action="cancel"
             >
               <XCircle className="size-3.5" />
@@ -190,6 +192,18 @@ export function GoalBanner({ sessionKey, messages }: Props) {
           </Button>
         </span>
       </div>
+
+      {confirming ? (
+        <GoalConfirmSheet
+          kind={confirming}
+          onClose={() => setConfirming(null)}
+          onConfirm={() => {
+            const kind = confirming
+            setConfirming(null)
+            void act(kind === 'pause' ? pauseGoal : cancelGoal)
+          }}
+        />
+      ) : null}
 
       {finished || parked ? (
         <div className="-mx-3 -mb-1.5">

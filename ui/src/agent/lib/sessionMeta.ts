@@ -93,7 +93,18 @@ export function parseSessionMeta(meta?: string): Omit<SessionMetaSnapshot, 'turn
 }
 
 /** Reads just the metadata of one session. */
+/** isStoredSessionID reports whether the id names a segment the server knows. */
+export function isStoredSessionID(id: string): boolean {
+  // A fresh tab carries a local placeholder (`conv-1-…`); only `<channel>:<chat>`
+  // segments (optionally `:vN`) exist on the server.
+  return id.includes(':')
+}
+
 export async function loadSessionMeta(sessionId: string): Promise<SessionMetaSnapshot> {
+  if (!isStoredSessionID(sessionId)) {
+    // Asking the server about a local placeholder would 404 on every new tab.
+    return { pendingQuestion: null, pendingApproval: null, turnRunning: false, compacting: false }
+  }
   const detail = await readAgentSessionMeta(sessionId)
   return { ...parseSessionMeta(detail.meta), turnRunning: detail.turn_running ?? false }
 }
