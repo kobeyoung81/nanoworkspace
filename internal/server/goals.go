@@ -49,6 +49,8 @@ func (s *Server) registerGoalRoutes(mux *http.ServeMux, prefix string) {
 	mux.HandleFunc("POST "+prefix+"/goals/{id}/cancel", s.handleGoalCancel)
 	mux.HandleFunc("POST "+prefix+"/goals/{id}/budget", s.handleGoalBudget)
 	mux.HandleFunc("POST "+prefix+"/goals/{id}/fork", s.handleGoalFork)
+	// The scheduled-task half of the panel is read-only (see cron.go).
+	mux.HandleFunc("GET "+prefix+"/goals/cron", s.handleCronList)
 }
 
 // goalsReady answers 503 before the store is attached.

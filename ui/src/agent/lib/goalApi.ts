@@ -175,3 +175,19 @@ export function forkGoal(id: string, condition?: string): Promise<DraftView> {
     base(),
   )
 }
+
+export type CronTask = {
+  id: string
+  name: string
+  enabled: boolean
+  schedule?: string
+  next_run_at_ms?: number
+}
+
+/** listCronTasks reads one agent's scheduled tasks (read-only, see the panel). */
+export function listCronTasks(agentId: string): Promise<{ tasks: CronTask[] }> {
+  return getHost().api.get<{ tasks: CronTask[] }>(
+    `/goals/cron?agent_id=${encodeURIComponent(agentId)}`,
+    base(),
+  )
+}

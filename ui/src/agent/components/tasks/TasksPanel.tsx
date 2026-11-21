@@ -7,12 +7,15 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { CirclePause, CirclePlay, Loader2, MessageSquare, Target, XCircle } from 'lucide-react'
+import { CirclePause, CirclePlay, Clock, Loader2, MessageSquare, Target, XCircle } from 'lucide-react'
+import { useWorkbench } from '../../workbench/context'
 
 import { cn } from '../../lib/utils'
 import { Button } from '../ui/button'
 import {
   cancelGoal,
+  listCronTasks,
+  type CronTask,
   goalIsActive,
   goalStatusLabel,
   listGoals,
@@ -134,6 +137,28 @@ export function TasksPanel(_props?: { ctx?: unknown; onOpenGoal?: (goal: Goal) =
   const [filter, setFilter] = useState<Filter>('running')
   const [busy, setBusy] = useState(false)
 
+  // The scheduled-task half is read-only (see the note in cron.go): the agent's
+  // cron service owns cron.json, so the panel lists what it has scheduled.
+  const { selectedAgent } = useWorkbench()
+  const [cronTasks, setCronTasks] = useState<CronTask[]>([])
+  useEffect(() => {
+    if (!selectedAgent) {
+      setCronTasks([])
+      return
+    }
+    let cancelled = false
+    void listCronTasks(selectedAgent)
+      .then((res) => {
+        if (!cancelled) setCronTasks(res.tasks ?? [])
+      })
+      .catch(() => {
+        if (!cancelled) setCronTasks([])
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [selectedAgent])
+
   const refresh = useCallback(async () => {
     try {
       const res = await listGoals()
@@ -183,6 +208,30 @@ export function TasksPanel(_props?: { ctx?: unknown; onOpenGoal?: (goal: Goal) =
 
   return (
     <div className="flex h-full min-h-0 flex-col overflow-hidden bg-card" data-tasks-panel>
+      <details className="border-b px-2 py-1 text-[11px]" data-task-cron>
+        <summary className="cursor-pointer text-muted-foreground">
+          <Clock className="mr-1 inline size-3" />
+          {t('panel.goals.section.tasks', { defaultValue: '定时任务' })} · {cronTasks.length}
+        </summary>
+        {cronTasks.length === 0 ? (
+          <p className="py-1 text-[11px] text-muted-foreground">
+            {t('panel.goals.cronEmpty', { defaultValue: '这个智能体还没有定时任务' })}
+          </p>
+        ) : (
+          <ul className="space-y-0.5 py-1">
+            {cronTasks.map((task) => (
+              <li key={task.id} className="flex items-center gap-1.5" data-cron-task={task.id}>
+                <span className={cn('size-1.5 shrink-0 rounded-full', task.enabled ? 'bg-emerald-500' : 'bg-muted-foreground/40')} />
+                <span className="min-w-0 flex-1 truncate">{task.name || task.id}</span>
+                <span className="shrink-0 text-muted-foreground">{task.schedule}</span>
+              </li>
+            ))}
+          </ul>
+        )}
+        <p className="pb-1 text-[10px] text-muted-foreground">
+          {t('panel.goals.cronReadOnly', { defaultValue: '启停在对话里用 cron 工具完成，面板只读' })}
+        </p>
+      </details>
       <div className="flex flex-wrap items-center gap-1 border-b px-2 py-1.5" data-task-filters>
         {(Object.keys(FILTER_STATUSES) as Filter[]).map((key) => (
           <button
