@@ -279,7 +279,7 @@ export function TasksPanel(_props?: { ctx?: unknown }) {
     <div ref={rootRef} className="flex h-full min-h-0 flex-col overflow-hidden bg-card" data-tasks-panel>
       <section
         className="flex min-h-0 flex-col"
-        style={{ height: split }}
+        style={{ height: split, minHeight: SPLIT_MIN }}
         data-tasks-section="goals"
       >
         <div className="flex flex-wrap items-center gap-1 border-b px-2 py-1.5" data-task-filters>

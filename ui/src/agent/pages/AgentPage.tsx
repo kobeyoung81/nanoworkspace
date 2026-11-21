@@ -3140,7 +3140,7 @@ function IndicatorRow({
   const { t } = useTranslation()
   const done = todos.filter((td) => td.status === 'completed').length
   return (
-    <div className="relative flex h-8 shrink-0 items-center px-5 text-xs text-muted-foreground" aria-live="polite">
+    <div className="relative flex h-8 shrink-0 items-center px-5 pr-3 text-xs text-muted-foreground" aria-live="polite">
       <span
         className={cn('flex items-center gap-1', !working && 'composer-dots-idle')}
         aria-hidden="true"
