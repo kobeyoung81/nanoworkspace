@@ -7,7 +7,7 @@
 // this is only the seed.
 
 /** The plugins a phone opens with, in tab order. */
-export const MOBILE_DEFAULT_TABS = ['agents', 'chat', 'files'] as const
+export const MOBILE_DEFAULT_TABS = ['agents', 'chat', 'files', 'tasks'] as const
 
 /** Which of them the phone shows first. */
 export const MOBILE_DEFAULT_ACTIVE = 'chat'

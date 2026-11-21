@@ -108,7 +108,7 @@ import {
 import { compactThresholdPct } from '../lib/contextRing'
 import { GoalDraft } from '../components/goal/GoalDraft'
 import { GoalCreateBar, GoalSplitCard } from '../components/goal/GoalCreate'
-import { createDraft, type DraftView } from '../lib/goalApi'
+import { createDraft, listGoals, type DraftView } from '../lib/goalApi'
 import { GoalBanner } from '../components/goal/GoalBanner'
 import { GoalStatusControl } from '../components/goal/GoalStatusControl'
 import { TasksPanel } from '../components/tasks/TasksPanel'
@@ -4637,7 +4637,7 @@ function formatTokens(n: number): string {
 // ChatStatusBarRight contributes global context usage to the footer's right edge.
 function ChatStatusBarRight() {
   const { summary } = useActiveConversation()
-  const { selected, selectedAgent } = useWorkbench()
+  const { selected, selectedAgent, ops } = useWorkbench()
   const { t } = useTranslation()
   const contextUsage = summary.contextUsage
   if (!selected && !selectedAgent) {
@@ -4645,7 +4645,8 @@ function ChatStatusBarRight() {
   }
   const usage = contextUsage ?? { used: 0, limit: 0, pct: 0 }
   return (
-    <span className="flex items-center gap-1.5">
+    <span className="flex items-center gap-3">
+      <GoalStatusBar onOpen={() => ops.openPanel('tasks')} />
       <span className="text-muted-foreground">{t('composer.contextLabel')}:</span>
       <ContextRing
         usagePct={usage.pct}
@@ -4655,6 +4656,56 @@ function ChatStatusBarRight() {
         threshold={usage.threshold}
       />
     </span>
+  )
+}
+
+// GoalStatusBar is the status-bar counter (product §5.7): it only exists while
+// something is running or queued, and clicking it opens the panel.
+function GoalStatusBar({ onOpen }: { onOpen: () => void }) {
+  const { t } = useTranslation()
+  const [counts, setCounts] = useState<{ running: number; queued: number } | null>(null)
+
+  useEffect(() => {
+    let cancelled = false
+    const load = async () => {
+      try {
+        const res = await listGoals()
+        if (cancelled) return
+        let running = 0
+        let queued = 0
+        for (const goal of res.goals ?? []) {
+          if (goal.status === 'running' || goal.status === 'verifying') running++
+          else if (goal.status === 'ready' || goal.status === 'validating' || goal.status === 'draft') queued++
+        }
+        setCounts({ running, queued })
+      } catch {
+        // A counter that cannot be read hides itself rather than showing zero.
+      }
+    }
+    void load()
+    const timer = window.setInterval(load, 5000)
+    return () => {
+      cancelled = true
+      window.clearInterval(timer)
+    }
+  }, [])
+
+  if (!counts || (counts.running === 0 && counts.queued === 0)) {
+    return null
+  }
+  return (
+    <button
+      type="button"
+      onClick={onOpen}
+      data-statusbar-goals=""
+      className="text-muted-foreground hover:text-foreground hover:underline"
+    >
+      {t('statusbar.goals', {
+        defaultValue: '{{running}} 个目标运行中 · {{queued}} 个排队',
+        running: counts.running,
+        queued: counts.queued,
+      })}
+    </button>
   )
 }
 

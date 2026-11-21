@@ -126,7 +126,9 @@ export function GoalBanner({ sessionKey, messages }: Props) {
                         round: goal.round,
                       })}
         </span>
-        <span className="truncate text-muted-foreground" title={goal.condition}>
+        {/* The phone keeps one line: the state, the round and the controls
+            collapse into ⋯ (product §5.8). */}
+        <span className="hidden min-w-0 flex-1 truncate text-muted-foreground sm:inline" title={goal.condition}>
           {goal.title || goal.condition}
         </span>
         {goal.last_verdict ? (
