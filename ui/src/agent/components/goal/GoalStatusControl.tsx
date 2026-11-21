@@ -10,7 +10,7 @@ import { CirclePause, ClipboardList, Target, Wrench } from 'lucide-react'
 
 import { cn } from '../../lib/utils'
 import { Button } from '../ui/button'
-import { goalIsActive, listGoalsForSession, pauseGoal, resumeGoal, type Goal } from '../../lib/goalApi'
+import { listGoalsForSession, pauseGoal, pickGoalForSession, resumeGoal, type Goal } from '../../lib/goalApi'
 
 const POLL_MS = 5000
 
@@ -29,10 +29,15 @@ export function GoalStatusControl({ sessionKey, planReady, planBusy, onActiveCha
   const [busy, setBusy] = useState(false)
 
   const refresh = useCallback(async () => {
+    if (!sessionKey.trim()) {
+      // No conversation key yet: there cannot be a goal, and asking would return
+      // every goal the user owns.
+      setGoal(null)
+      return
+    }
     try {
       const res = await listGoalsForSession(sessionKey)
-      const active = (res.goals ?? []).find(goalIsActive) ?? (res.goals ?? [])[0] ?? null
-      setGoal(active)
+      setGoal(pickGoalForSession(res.goals ?? [], sessionKey))
     } catch {
       setGoal((prev) => prev)
     }
@@ -70,7 +75,7 @@ export function GoalStatusControl({ sessionKey, planReady, planBusy, onActiveCha
     const pct = goal.max_rounds > 0 ? Math.min(100, Math.round(((goal.round + 1) / goal.max_rounds) * 100)) : 0
     const running = goal.status === 'running' || goal.status === 'verifying'
     return (
-      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 px-3 py-1 text-[11px]" data-goal-status="goal">
+      <div className="flex items-center gap-2 text-[11px]" data-goal-status="goal">
         <span className="flex items-center gap-1 font-medium text-foreground">
           <Target className="size-3.5 text-primary" />
           {t('goal.status.title', { defaultValue: '◎ 长程目标' })}
@@ -106,7 +111,7 @@ export function GoalStatusControl({ sessionKey, planReady, planBusy, onActiveCha
 
   if (planReady || planBusy) {
     return (
-      <div className="flex items-center gap-2 px-3 py-1 text-[11px]" data-goal-status="plan">
+      <div className="flex items-center gap-2 text-[11px]" data-goal-status="plan">
         <ClipboardList className="size-3.5 text-muted-foreground" />
         <span className="font-medium">
           {t('goal.status.plan', { defaultValue: '📋 计划' })}

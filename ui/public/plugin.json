@@ -20,8 +20,8 @@
     {
       "id": "tasks",
       "title": {
-        "zh-CN": "任务与目标",
-        "en": "Tasks & Goals"
+        "zh-CN": "任务",
+        "en": "Tasks"
       },
       "icon": "boxes",
       "slot": "left",

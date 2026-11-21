@@ -540,6 +540,24 @@ func (s *Store) OverdueCancellations(ctx context.Context, before time.Time, limi
 	return out, cur.Err()
 }
 
+// DeleteGoal removes a goal outright, whatever its status.
+//
+// The design says goals are never deleted; the user asked for an explicit way out
+// of a stuck or mistaken one, so this is a physical delete scoped by owner.
+func (s *Store) DeleteGoal(ctx context.Context, userID, id string) error {
+	res, err := s.db.Collection(goalsCollection).DeleteOne(ctx, bson.D{
+		{Key: "user_id", Value: userID},
+		{Key: "id", Value: id},
+	})
+	if err != nil {
+		return fmt.Errorf("delete goal: %w", err)
+	}
+	if res.DeletedCount == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
 // CountActiveForAgent reports how many of an agent's goals hold the execution
 // slot. The scheduler uses it to keep one round at a time per agent: two goals
 // would edit the same working tree.

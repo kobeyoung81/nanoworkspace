@@ -3056,15 +3056,6 @@ function AgentWindow({
           )
         ) : null}
       </div>
-      {/* The status control replaces the todo counter (product §5.6): progress is
-          system-driven. TodoPanel stays mounted for the agent's own working notes
-          but is no longer the progress display. */}
-      <GoalStatusControl
-        sessionKey={activeConversationKey ?? ''}
-        planReady={planState !== 'none'}
-        planBusy={working && planState !== 'none'}
-        onActiveChange={setGoalActive}
-      />
       <TodoPanel todos={todos} open={showTodos && !goalActive} />
       <IndicatorRow
         working={working}
@@ -3073,6 +3064,14 @@ function AgentWindow({
         todos={goalActive ? [] : todos}
         onToggleTodos={() => setShowTodos((v) => !v)}
         showTodos={showTodos && !goalActive}
+        goalControl={
+          <GoalStatusControl
+            sessionKey={activeConversationKey ?? ''}
+            planReady={planState !== 'none'}
+            planBusy={working && planState !== 'none'}
+            onActiveChange={setGoalActive}
+          />
+        }
       />
       {statusEvent?.event === 'capabilities_reload' && (
         <ReloadPill key={statusEvent.at} state={statusEvent.state === 'applied' ? 'applied' : 'pending'} />
@@ -3110,6 +3109,7 @@ function IndicatorRow({
   todos,
   showTodos,
   onToggleTodos,
+  goalControl,
 }: {
   working: boolean
   showJump: boolean
@@ -3117,6 +3117,8 @@ function IndicatorRow({
   todos: TodoItem[]
   showTodos: boolean
   onToggleTodos: () => void
+  /** The goal status control, right-aligned on this row (product §5.6). */
+  goalControl?: React.ReactNode
 }) {
   const { t } = useTranslation()
   const done = todos.filter((td) => td.status === 'completed').length
@@ -3145,13 +3147,15 @@ function IndicatorRow({
           <ArrowDown className="size-4" />
         </button>
       ) : null}
+      {goalControl ? <span className="ml-auto flex items-center">{goalControl}</span> : null}
       {todos.length > 0 ? (
         <button
           type="button"
           onClick={onToggleTodos}
           aria-expanded={showTodos}
           className={cn(
-            'ml-auto flex select-none items-center gap-1 rounded-md px-2 py-0.5 text-sm tabular-nums transition-colors hover:bg-accent hover:text-foreground',
+            'flex select-none items-center gap-1 rounded-md px-2 py-0.5 text-sm tabular-nums transition-colors hover:bg-accent hover:text-foreground',
+            goalControl ? 'ml-2' : 'ml-auto',
             showTodos && 'bg-accent text-foreground',
           )}
         >

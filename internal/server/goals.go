@@ -8,6 +8,7 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -49,6 +50,7 @@ func (s *Server) registerGoalRoutes(mux *http.ServeMux, prefix string) {
 	mux.HandleFunc("POST "+prefix+"/goals/{id}/cancel", s.handleGoalCancel)
 	mux.HandleFunc("POST "+prefix+"/goals/{id}/budget", s.handleGoalBudget)
 	mux.HandleFunc("POST "+prefix+"/goals/{id}/fork", s.handleGoalFork)
+	mux.HandleFunc("DELETE "+prefix+"/goals/{id}", s.handleGoalDelete)
 	// The scheduled-task half of the panel is read-only (see cron.go).
 	mux.HandleFunc("GET "+prefix+"/goals/cron", s.handleCronList)
 }
@@ -207,10 +209,14 @@ func (s *Server) handleGoalList(w http.ResponseWriter, r *http.Request) {
 		goals []*store.Goal
 		err   error
 	)
-	if key := strings.TrimSpace(r.URL.Query().Get("session_key")); key != "" {
-		goals, err = s.goals.ListBySession(r.Context(), identity.UserID, key)
-	} else {
+	key, mode := sessionKeyFilter(r.URL.Query())
+	switch mode {
+	case listAllGoals:
 		goals, err = s.goals.ListByUser(r.Context(), identity.UserID, 200)
+	case listNoGoals:
+		goals = []*store.Goal{}
+	default:
+		goals, err = s.goals.ListBySession(r.Context(), identity.UserID, key)
 	}
 	if err != nil {
 		slog.Error("list goals", "error", err)
@@ -218,6 +224,33 @@ func (s *Server) handleGoalList(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"goals": goals})
+}
+
+// The three ways a goal list can be filtered (see handleGoalList).
+const (
+	listAllGoals = iota
+	listOneSession
+	listNoGoals
+)
+
+// sessionKeyFilter reads the list filter from the query.
+//
+// The distinction matters: "no parameter" is the panel asking for everything,
+// while an empty value is a conversation that has no key yet — treating that as
+// "everything" made a brand-new conversation show another goal's progress.
+func sessionKeyFilter(q url.Values) (key string, mode int) {
+	raw, has := q["session_key"]
+	if !has {
+		return "", listAllGoals
+	}
+	if len(raw) == 0 {
+		return "", listNoGoals
+	}
+	key = strings.TrimSpace(raw[0])
+	if key == "" {
+		return "", listNoGoals
+	}
+	return key, listOneSession
 }
 
 func (s *Server) handleGoalGet(w http.ResponseWriter, r *http.Request) {

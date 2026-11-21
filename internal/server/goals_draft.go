@@ -536,3 +536,23 @@ func parseBudget(value string) (rounds, minutes int) {
 	}
 	return rounds, minutes
 }
+
+// handleGoalDelete removes a goal outright (user's call: physical, any status).
+//
+// A round still in flight reports to a 404 afterwards; the report endpoint counts
+// that as a judge failure and changes nothing else.
+func (s *Server) handleGoalDelete(w http.ResponseWriter, r *http.Request) {
+	if !s.goalsReady(w) {
+		return
+	}
+	identity, ok := auth.FromContext(r.Context())
+	if !ok {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+		return
+	}
+	if err := s.goals.DeleteGoal(r.Context(), identity.UserID, r.PathValue("id")); err != nil {
+		s.writeGoalError(w, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}

@@ -8,7 +8,7 @@ import { useTranslation } from 'react-i18next'
 
 import { Button } from '../ui/button'
 
-export type ConfirmKind = 'pause' | 'cancel'
+export type ConfirmKind = 'pause' | 'cancel' | 'delete'
 
 export function GoalConfirmSheet({
   kind,
@@ -25,9 +25,13 @@ export function GoalConfirmSheet({
       ? t('goal.pause.confirm', {
           defaultValue: '暂停后当前这一轮会做完，之后不再开始新一轮。随时可以继续。',
         })
-      : t('goal.stop.confirm', {
-          defaultValue: '叫停后不能恢复，已经完成的工作会保留。要继续请重新创建目标。',
-        })
+      : kind === 'cancel'
+        ? t('goal.stop.confirm', {
+            defaultValue: '叫停后不能恢复，已经完成的工作会保留。要继续请重新创建目标。',
+          })
+        : t('goal.delete.confirm', {
+            defaultValue: '删除后目标和它的轮次记录都不会保留。要继续请重新创建目标。',
+          })
 
   return (
     <div
@@ -48,13 +52,15 @@ export function GoalConfirmSheet({
           </Button>
           <Button
             size="sm"
-            variant={kind === 'cancel' ? 'destructive' : 'default'}
+            variant={kind === 'cancel' || kind === 'delete' ? 'destructive' : 'default'}
             onClick={onConfirm}
             data-goal-confirm-ok
           >
             {kind === 'pause'
               ? t('goal.banner.pause', { defaultValue: '暂停' })
-              : t('goal.banner.cancel', { defaultValue: '叫停' })}
+              : kind === 'cancel'
+                ? t('goal.banner.cancel', { defaultValue: '叫停' })
+                : t('goal.delete.action', { defaultValue: '删除' })}
           </Button>
         </div>
       </div>

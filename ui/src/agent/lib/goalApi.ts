@@ -113,10 +113,26 @@ export function listGoals(): Promise<{ goals: Goal[] }> {
 }
 
 export function listGoalsForSession(sessionKey: string): Promise<{ goals: Goal[] }> {
+  // A conversation without a key has no goals. Sending `session_key=` would ask
+  // the server for "everything" and paint another conversation's progress here.
+  if (!sessionKey.trim()) {
+    return Promise.resolve({ goals: [] })
+  }
   return getHost().api.get<{ goals: Goal[] }>(
     `/goals?session_key=${encodeURIComponent(sessionKey)}`,
     base(),
   )
+}
+
+/** pickGoalForSession is the pure form of the rule above, for tests. */
+export function pickGoalForSession(goals: Goal[], sessionKey: string): Goal | null {
+  if (!sessionKey.trim()) return null
+  return goals.find((g) => goalIsActive(g)) ?? goals[0] ?? null
+}
+
+/** deleteGoal removes a goal outright (any status, confirmed by the caller). */
+export function deleteGoal(id: string): Promise<void> {
+  return getHost().api.del<void>(`/goals/${encodeURIComponent(id)}`, base())
 }
 
 export function pauseGoal(id: string): Promise<{ status: string }> {
