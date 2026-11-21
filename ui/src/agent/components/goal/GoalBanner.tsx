@@ -11,9 +11,11 @@ import { AlertTriangle, ChevronDown, ChevronUp, CirclePause, CirclePlay, Target,
 
 import { cn } from '../../lib/utils'
 import { Button } from '../ui/button'
+import { GoalEndCard } from './GoalEndCard'
 import {
   cancelGoal,
   goalIsActive,
+  forkGoal,
   listGoalsForSession,
   pauseGoal,
   resumeGoal,
@@ -86,6 +88,9 @@ export function GoalBanner({ sessionKey }: Props) {
   const pausable = goal.status === 'running' || goal.status === 'verifying'
   const resumable = goal.status === 'paused'
   const cancellable = goalIsActive(goal)
+
+  const finished = goal.status === 'achieved' || goal.status === 'failed' || goal.status === 'cancelled'
+  const parked = goal.status === 'paused'
 
   return (
     <div className="border-b bg-muted/30 px-3 py-1.5 text-xs" data-goal-banner={goal.status}>
@@ -180,6 +185,17 @@ export function GoalBanner({ sessionKey }: Props) {
           </Button>
         </span>
       </div>
+
+      {finished || parked ? (
+        <div className="-mx-3 -mb-1.5">
+          <GoalEndCard
+            goal={goal}
+            onResume={() => void act(resumeGoal)}
+            onFork={() => void act(async (id) => forkGoal(id))}
+            onExpandRounds={() => setOpen(true)}
+          />
+        </div>
+      ) : null}
 
       {open ? (
         <div className="mt-1.5 space-y-1 border-t pt-1.5" data-goal-rounds>

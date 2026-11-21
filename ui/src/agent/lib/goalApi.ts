@@ -41,6 +41,7 @@ export type Goal = {
   max_rounds: number
   max_minutes: number
   verify_result?: string
+  pause_reason?: string
   last_verdict?: string
   last_reason?: string
   last_missing?: string[]
@@ -164,4 +165,13 @@ export function goalStatusLabel(g: Goal): string {
     default:
       return g.status
   }
+}
+
+/** forkGoal copies a goal into a new draft with a different condition. */
+export function forkGoal(id: string, condition?: string): Promise<DraftView> {
+  return getHost().api.post<DraftView>(
+    `/goals/${encodeURIComponent(id)}/fork`,
+    { condition },
+    base(),
+  )
 }

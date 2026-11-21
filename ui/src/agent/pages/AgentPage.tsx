@@ -110,6 +110,7 @@ import { GoalDraft } from '../components/goal/GoalDraft'
 import { GoalCreateBar, GoalSplitCard } from '../components/goal/GoalCreate'
 import { createDraft, type DraftView } from '../lib/goalApi'
 import { GoalBanner } from '../components/goal/GoalBanner'
+import { GoalStatusControl } from '../components/goal/GoalStatusControl'
 import { TasksPanel } from '../components/tasks/TasksPanel'
 import { conversationModeOf, defaultModeOf, resolveAgentMode } from '../lib/agentMode'
 import { getAgentMode, setAgentMode } from '../lib/capabilities'
@@ -2791,6 +2792,29 @@ function AgentWindow({
   // The conversation's goals: the banner asks by base key, so a compaction does
   // not detach the banner from its goal.
   const { activeConversationKey } = useWorkbench()
+  // Whether the status control is showing a goal; while it is, the todo counter
+  // steps aside (one position, one subject).
+  const [goalActive, setGoalActive] = useState(false)
+  const [planState, setPlanState] = useState<'none' | 'unused'>('none')
+  const activeConv = useActiveConversation()
+  useEffect(() => {
+    let cancelled = false
+    const sessionID = activeConv.id
+    if (!sessionID) {
+      setPlanState('none')
+      return
+    }
+    void loadSessionMeta(sessionID)
+      .then((meta) => {
+        if (!cancelled) setPlanState(hasUnusedPlan(meta) ? 'unused' : 'none')
+      })
+      .catch(() => {
+        if (!cancelled) setPlanState('none')
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [activeConv.id])
 
   const handleAtBottom = useCallback((atBottom: boolean) => {
     atBottomRef.current = atBottom
@@ -2888,14 +2912,23 @@ function AgentWindow({
           )
         ) : null}
       </div>
-      <TodoPanel todos={todos} open={showTodos} />
+      {/* The status control replaces the todo counter (product §5.6): progress is
+          system-driven. TodoPanel stays mounted for the agent's own working notes
+          but is no longer the progress display. */}
+      <GoalStatusControl
+        sessionKey={activeConversationKey ?? ''}
+        planReady={planState !== 'none'}
+        planBusy={working && planState !== 'none'}
+        onActiveChange={setGoalActive}
+      />
+      <TodoPanel todos={todos} open={showTodos && !goalActive} />
       <IndicatorRow
         working={working}
         showJump={showJump}
         onGoToLatest={() => scrollToLatest('smooth')}
-        todos={todos}
+        todos={goalActive ? [] : todos}
         onToggleTodos={() => setShowTodos((v) => !v)}
-        showTodos={showTodos}
+        showTodos={showTodos && !goalActive}
       />
       {statusEvent?.event === 'capabilities_reload' && (
         <ReloadPill key={statusEvent.at} state={statusEvent.state === 'applied' ? 'applied' : 'pending'} />
@@ -3378,6 +3411,14 @@ function Composer({
     [send, t],
   )
 
+  // The end card and the plan-form status control both ask for the creation flow
+  // by event: they live in different panes and cannot call this directly.
+  useEffect(() => {
+    const onRequest = () => void openGoalFlowRef.current?.()
+    window.addEventListener('goal:create', onRequest)
+    return () => window.removeEventListener('goal:create', onRequest)
+  }, [])
+
   const openGoalFlow = useCallback(async () => {
     setGoalPlanRef(undefined)
     setGoalDescription('')
@@ -3400,6 +3441,11 @@ function Composer({
     }
     setGoalStage('create')
   }, [activeSession.id])
+
+  const openGoalFlowRef = useRef<(() => Promise<void>) | null>(null)
+  useEffect(() => {
+    openGoalFlowRef.current = openGoalFlow
+  }, [openGoalFlow])
   const working = busy || serverRunning
   // The toolbar's fit ladder: the row is measured and steps down until its
   // trailing controls sit inside the composer's border (see hooks/composerFit.ts).
