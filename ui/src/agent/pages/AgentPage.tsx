@@ -107,7 +107,9 @@ import {
 } from '../lib/api'
 import { compactThresholdPct } from '../lib/contextRing'
 import { GoalDraft } from '../components/goal/GoalDraft'
+import { GoalCreateBar, GoalSplitCard } from '../components/goal/GoalCreate'
 import { GoalBanner } from '../components/goal/GoalBanner'
+import { TasksPanel } from '../components/tasks/TasksPanel'
 import { conversationModeOf, defaultModeOf, resolveAgentMode } from '../lib/agentMode'
 import { getAgentMode, setAgentMode } from '../lib/capabilities'
 import { listMyModels } from '../lib/models'
@@ -172,7 +174,7 @@ import {
 import { messagesFromProvider, parseProviderMessages } from '../lib/historyMessages'
 import { composeAnswer } from '../lib/questionAnswer'
 import { questionPairs } from '../lib/questionRecord'
-import { parseSessionMeta, loadSessionMeta } from '../lib/sessionMeta'
+import { hasUnusedPlan, parseSessionMeta, loadSessionMeta } from '../lib/sessionMeta'
 import { formatToolArgs } from '../lib/toolDisplay'
 
 // Below this width the workbench switches to its mobile layout; the chat area
@@ -2588,10 +2590,13 @@ function GitPanel() {
 
 // PANEL_ORDER is the order the manifest shipped them in: the layout a browser
 // stored before the move (same panel ids, same keys) opens exactly as it was.
-const PANEL_ORDER = ['agents', 'chat', 'files', 'terminal', 'user-config', 'git']
+const PANEL_ORDER = ['agents', 'tasks', 'chat', 'files', 'terminal', 'user-config', 'git']
 
 const PANEL_MODULES: Record<string, WorkbenchPlugin> = {
   agents: { id: 'agents', icon: Bot, titleKey: 'agent.agents', defaultSlot: 'left', Component: memo(AgentsPanel) },
+  // The cross-agent view of what is running. It sits beside the conversation
+  // rather than on a page of its own (user's call, 2026-11-21).
+  tasks: { id: 'tasks', icon: Target, titleKey: 'panel.goals.title', defaultSlot: 'left', Component: memo(TasksPanel) },
   chat: { id: 'chat', icon: MessageSquare, titleKey: 'workbench.panel.chat', defaultSlot: 'center', Component: memo(ConversationHost), HeaderActions: ChatHeaderActions, StatusBar: ChatStatusBar, StatusBarRight: ChatStatusBarRight },
   files: { id: 'files', icon: FolderOpen, titleKey: 'nav.files', defaultSlot: 'right', Component: memo(FilesPanel) },
   terminal: { id: 'terminal', icon: SquareTerminal, titleKey: 'workbench.panel.terminal', defaultSlot: 'bottom', Component: memo(TerminalPanel), HeaderActions: TerminalHeaderActions, StatusBar: TerminalStatusBar },
@@ -3345,7 +3350,35 @@ function Composer({
   // The goal card is a server-backed draft, so it needs the conversation's base
   // key: that is what the scheduler will dispatch rounds into.
   const { activeConversationKey, selectedAgent } = useWorkbench()
-  const [goalOpen, setGoalOpen] = useState(false)
+  // The creation flow has three states (product §5.1–§5.3): decide whether the
+  // conversation already has a plan to build on, collect one sentence, then show
+  // the confirmation card. It is one state machine, not three booleans.
+  const [goalStage, setGoalStage] = useState<'none' | 'split' | 'create' | 'confirm'>('none')
+  const [goalPlanRef, setGoalPlanRef] = useState<string | undefined>(undefined)
+  const [goalDescription, setGoalDescription] = useState('')
+  const activeSession = useActiveConversation()
+
+  const openGoalFlow = useCallback(async () => {
+    setGoalPlanRef(undefined)
+    setGoalDescription('')
+    let planPath: string | undefined
+    if (activeSession.id) {
+      try {
+        const meta = await loadSessionMeta(activeSession.id)
+        if (hasUnusedPlan(meta)) {
+          planPath = meta.planPath
+        }
+      } catch {
+        // No meta is not a reason to block creation: fall through to describing.
+      }
+    }
+    if (planPath) {
+      setGoalPlanRef(planPath)
+      setGoalStage('split')
+      return
+    }
+    setGoalStage('create')
+  }, [activeSession.id])
   const working = busy || serverRunning
   // The toolbar's fit ladder: the row is measured and steps down until its
   // trailing controls sit inside the composer's border (see hooks/composerFit.ts).
@@ -3666,13 +3699,38 @@ function Composer({
 
   return (
     <form ref={composerRef} onSubmit={submit} className="p-3 pt-1">
-      {goalOpen && selectedAgent && activeConversationKey ? (
-        <GoalDraft
-          agentId={selectedAgent}
-          sessionKey={activeConversationKey}
-          onClose={() => setGoalOpen(false)}
-          onStarted={() => setGoalOpen(false)}
-        />
+      {selectedAgent && activeConversationKey ? (
+        <>
+          {goalStage === 'split' ? (
+            <GoalSplitCard
+              onClose={() => setGoalStage('none')}
+              onRestart={() => {
+                setGoalPlanRef(undefined)
+                setGoalStage('create')
+              }}
+              onUsePlan={() => setGoalStage('confirm')}
+            />
+          ) : null}
+          {goalStage === 'create' ? (
+            <GoalCreateBar
+              onClose={() => setGoalStage('none')}
+              onSubmit={(description) => {
+                setGoalDescription(description)
+                setGoalStage('confirm')
+              }}
+            />
+          ) : null}
+          {goalStage === 'confirm' ? (
+            <GoalDraft
+              agentId={selectedAgent}
+              sessionKey={activeConversationKey}
+              planRef={goalPlanRef}
+              initialCondition={goalDescription}
+              onClose={() => setGoalStage('none')}
+              onStarted={() => setGoalStage('none')}
+            />
+          ) : null}
+        </>
       ) : null}
       <div className="relative w-full">
         <div className="pointer-events-none absolute -inset-px z-0 rounded-lg shadow-[0_0_14px_-6px] shadow-primary/20" aria-hidden />
@@ -3816,7 +3874,7 @@ function Composer({
                 voiceActive && 'hidden',
               )}
             >
-              <InstructionsMenu onCommand={sendCommand} onGoal={() => setGoalOpen(true)} tier={tier} />
+              <InstructionsMenu onCommand={sendCommand} onGoal={() => void openGoalFlow()} tier={tier} />
             </div>
           ) : null}
           {voiceActive ? (

@@ -16,6 +16,20 @@
         "module": "workspace/panels",
         "export": "GitPanel"
       }
+    },
+    {
+      "id": "tasks",
+      "title": {
+        "zh-CN": "任务与目标",
+        "en": "Tasks & Goals"
+      },
+      "icon": "boxes",
+      "slot": "left",
+      "mount": {
+        "kind": "module",
+        "module": "workspace/panels",
+        "export": "TasksPanelContribution"
+      }
     }
   ],
   "pages": [
@@ -56,19 +70,6 @@
         "kind": "module",
         "module": "workspace/pages",
         "export": "AgentPage"
-      }
-    },
-    {
-      "id": "tasks",
-      "path": "/tasks",
-      "title": {
-        "zh-CN": "长程目标",
-        "en": "Long-run goals"
-      },
-      "mount": {
-        "kind": "module",
-        "module": "workspace/pages",
-        "export": "TasksPage"
       }
     }
   ],

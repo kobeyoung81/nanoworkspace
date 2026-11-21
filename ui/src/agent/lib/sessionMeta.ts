@@ -25,6 +25,16 @@ export type SessionMetaSnapshot = {
    * own build/plan answer, carried across a compaction handoff and dropped by
    * /new (see lib/agentMode). */
   sessionAgent?: string
+  /** The plan this conversation last wrote (`last_plan_path`). Empty when none. */
+  planPath?: string
+  /** The plan `plan_execute` closed. plan_execute clears planPath as it runs, so
+   * equality means the plan is already used. */
+  planExecuted?: string
+}
+
+/** hasUnusedPlan reports whether the conversation has a plan no goal consumed. */
+export function hasUnusedPlan(meta: Pick<SessionMetaSnapshot, 'planPath' | 'planExecuted'>): boolean {
+  return !!meta.planPath && meta.planPath !== meta.planExecuted
 }
 
 /** Parses the `meta` blob; each field is ignored when it is malformed. */
@@ -51,6 +61,12 @@ export function parseSessionMeta(meta?: string): Omit<SessionMetaSnapshot, 'turn
   }
   if (fields.handoff_from) {
     parsed.previousSessionId = fields.handoff_from
+  }
+  if (fields.last_plan_path) {
+    parsed.planPath = fields.last_plan_path
+  }
+  if (fields.plan_executed) {
+    parsed.planExecuted = fields.plan_executed
   }
   if (fields.todos) {
     try {

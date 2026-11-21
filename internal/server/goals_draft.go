@@ -1,15 +1,19 @@
 package server
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"regexp"
 	"strconv"
 	"strings"
 	"time"
 
+	"gitee.com/kobeyoung81/nanoprotocol"
 	"gitee.com/kobeyoung81/nanoworkspace/internal/auth"
 	"gitee.com/kobeyoung81/nanoworkspace/internal/goal"
 	"gitee.com/kobeyoung81/nanoworkspace/internal/store"
@@ -117,6 +121,18 @@ func (s *Server) handleDraftCreate(w http.ResponseWriter, r *http.Request) {
 		req.MaxMinutes = 180
 	}
 
+	// A plan-backed draft is pre-filled from the file: the condition and the
+	// evidence are exactly what a plan written under the current Plan prompt
+	// carries.
+	var parts goal.PlanParts
+	if ref := strings.TrimSpace(req.PlanRef); ref != "" {
+		if md, err := s.readPlanFile(r.Context(), req.AgentID, identity.UserID, ref); err != nil {
+			slog.Warn("read plan for the draft", "plan", ref, "error", err)
+		} else {
+			parts = goal.ParsePlan(md)
+		}
+	}
+
 	g := &store.Goal{
 		ID:         "g_" + randomHex(6),
 		UserID:     identity.UserID,
@@ -125,8 +141,9 @@ func (s *Server) handleDraftCreate(w http.ResponseWriter, r *http.Request) {
 		ChatID:     req.ChatID,
 		SessionKey: req.SessionKey,
 		Origin:     req.Origin,
-		Title:      req.Title,
-		Condition:  req.Condition,
+		Title:      firstNonEmpty(req.Title, req.Approach, planApproach(parts)),
+		Condition:  firstNonEmpty(req.Condition, parts.Condition),
+		Proof:      proofSteps(parts.Proof),
 		PlanRef:    req.PlanRef,
 		Mode:       "build",
 		Status:     goal.Draft,
@@ -344,6 +361,60 @@ func (s *Server) handleGoalFork(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, s.draftView(&forked))
+}
+
+// readPlanFile reads a plan through the container tunnel: the file lives in the
+// agent's volume, which this service never mounts.
+func (s *Server) readPlanFile(ctx context.Context, agentID, userID, planRef string) (string, error) {
+	if s.tunnels == nil {
+		return "", fmt.Errorf("no tunnel client")
+	}
+	path := "/api/v1/files/" + url.PathEscape(agentID) + "/content?path=" + url.QueryEscape(planRef)
+	resp, err := s.tunnels.Do(ctx, userID, nanoprotocol.TunnelRequest{
+		Method: http.MethodGet, Path: path, Headers: map[string][]string{},
+	})
+	if err != nil {
+		return "", err
+	}
+	if resp.Status != http.StatusOK {
+		return "", fmt.Errorf("tunnel answered %d", resp.Status)
+	}
+	return string(resp.Body), nil
+}
+
+// proofSteps turns the plan's evidence lines into the goal's proof steps. A line
+// that names an exit code is stored as a command; anything else is a note.
+func proofSteps(lines []string) []store.ProofStep {
+	if len(lines) == 0 {
+		return nil
+	}
+	out := make([]store.ProofStep, 0, len(lines))
+	for _, line := range lines {
+		step := store.ProofStep{Kind: "note", Note: line}
+		if strings.Contains(line, "退出码") || strings.Contains(line, "exit") {
+			step = store.ProofStep{Kind: "command", Command: line}
+		}
+		out = append(out, step)
+	}
+	return out
+}
+
+// planApproach is the "怎么走" line a plan-backed draft starts with: the step
+// count, because the card expands the plan itself for the detail.
+func planApproach(p goal.PlanParts) string {
+	if len(p.Steps) == 0 {
+		return ""
+	}
+	return fmt.Sprintf("%d 步（来自计划）", len(p.Steps))
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, v := range values {
+		if strings.TrimSpace(v) != "" {
+			return v
+		}
+	}
+	return ""
 }
 
 // loadDraft resolves the caller's draft (or refuses).
