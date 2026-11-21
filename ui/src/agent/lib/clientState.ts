@@ -31,6 +31,7 @@ export type StateArea =
   | 'agentsPane'
   | 'agentGroups'
   | 'agentRead'
+  | 'agentReadBaseline'
   | 'mic'
   | 'voiceShortcut'
 
@@ -99,6 +100,8 @@ function tailFor(area: StateArea, suffix?: string): string {
       return `agentGroups.${suffix}`
     case 'agentRead':
       return `agentRead.${suffix}`
+    case 'agentReadBaseline':
+      return 'agentReadBaseline'
   }
 }
 

@@ -24,3 +24,23 @@ export function paneLayerClass(active: boolean): string {
 export function paneLayerAriaHidden(active: boolean): boolean {
   return !active
 }
+
+/**
+ * Whether the user is actually looking at this conversation.
+ *
+ * "Open" is not "looking": every tab keeps its pane mounted, the workbench hides
+ * the panels it is not showing behind `display:none`, and a backgrounded browser
+ * tab keeps its React tree alive. Unread badges may only clear for the
+ * conversation that passes all three checks — otherwise a message that arrives in
+ * a background tab is marked read the moment it lands.
+ */
+export function isReadingConversation(input: {
+  /** This conversation's tab is the active one. */
+  tabActive: boolean
+  /** The chat panel itself is on screen (see useIsLaidOut). */
+  panelVisible: boolean
+  /** The browser page is visible (not a background tab, not a backgrounded app). */
+  documentVisible: boolean
+}): boolean {
+  return input.tabActive && input.panelVisible && input.documentVisible
+}

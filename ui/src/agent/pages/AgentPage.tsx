@@ -35,7 +35,7 @@ import { getHost, setHost } from '../../host'
 import { usePlugins } from '../portal/registry'
 import { useTheme } from '../lib/theme'
 import { recordDiag } from '../lib/debug'
-import { paneLayerAriaHidden, paneLayerClass } from '../lib/paneVisibility'
+import { isReadingConversation, paneLayerAriaHidden, paneLayerClass } from '../lib/paneVisibility'
 import type { WorkbenchPlugin } from '../workbench/types'
 import type { PanelOps, AgentWorkbench, ChatWorkbench } from '../workbench/context'
 import { AgentWorkbenchProvider, ChatWorkbenchProvider, useWorkbench, useChatWorkbench } from '../workbench/context'
@@ -60,6 +60,7 @@ import { CapabilityList } from '../components/agent/CapabilitiesQuickMenu'
 import { useAgentCapabilities } from '../hooks/useAgentCapabilities'
 import { useAutoGrowTextarea } from '../hooks/useAutoGrowTextarea'
 import { useIsLaidOut } from '../hooks/useIsLaidOut'
+import { useDocumentVisible } from '../hooks/useDocumentVisible'
 import { useComposerFit } from '../hooks/composerFit'
 import { trailingAction } from '../composer/trailingAction'
 import { elementOnScreen, matchesShortcut, resolveShortcut, shortcutLabel, isMacPlatform } from '../lib/shortcut'
@@ -153,7 +154,7 @@ import {
   indexAttention,
   sessionAttention,
   attentionKey,
-  nextReadAt,
+  type AttentionIndex,
   type ConversationAttention,
   type ReadAt,
 } from '../conversations/attention'
@@ -286,6 +287,14 @@ function SignedInAgent({ userId }: { userId: string }) {
   const [readAt, setReadAt] = useState<ReadAt>(() =>
     readState<ReadAt>('agentRead', undefined, parseReadAt, {}),
   )
+  // When this browser first looked at the platform. Conversations with no
+  // `readAt` entry that are newer than this are unread; everything older is
+  // history this browser may simply never have opened. Captured once and kept,
+  // so a conversation started on another device does not arrive pre-read.
+  const [readBaseline, setReadBaseline] = useState<string>(() =>
+    readState<string>('agentReadBaseline', undefined, parseTimestamp, ''),
+  )
+  const readBaselineRef = useRef(readBaseline)
   const [collapsedGroups, setCollapsedGroups] = useState<string[]>(() =>
     readState<string[]>('agentGroups', 'collapsed', parseStringList, []),
   )
@@ -321,16 +330,16 @@ function SignedInAgent({ userId }: { userId: string }) {
     listAgentAttention()
       .then((rows) => {
         setAttentionRows(rows)
-        // Conversations this browser has never seen start out read: the first
-        // snapshot is a baseline, not a page of unread history.
-        setReadAt((previous) => {
-          const next = nextReadAt(rows, previous)
-          if (next === previous) {
-            return previous
-          }
-          writeStateMerged('agentRead', undefined, next, previous, mergeReadAt, parseReadAt)
-          return next
-        })
+        // The first snapshot a browser ever sees establishes the baseline: the
+        // history that exists then is read, and anything newer than it is not.
+        // Doing this once (instead of treating every unseen key as read) is what
+        // keeps a conversation started elsewhere from arriving pre-read.
+        if (!readBaselineRef.current) {
+          const baseline = new Date().toISOString()
+          readBaselineRef.current = baseline
+          setReadBaseline(baseline)
+          writeState('agentReadBaseline', undefined, baseline)
+        }
       })
       .catch(() => {})
   }, [])
@@ -339,37 +348,35 @@ function SignedInAgent({ userId }: { userId: string }) {
   const attentionWithLive = useMemo(
     () =>
       applyLiveAttention(
-        indexAttention(attentionRows, readAt),
+        indexAttention(attentionRows, readAt, readBaseline),
         conversationsState.tabs,
         conversationsState.summaries,
       ),
-    [attentionRows, readAt, conversationsState],
+    [attentionRows, readAt, readBaseline, conversationsState],
   )
 
-  // The conversation on screen is being read: record its server timestamp so
-  // switching away does not immediately mark it unread.
-  useEffect(() => {
-    const active = conversationsState.tabs.find((tab) => tab.id === conversationsState.activeId)
-    if (!active?.agentId || !active.chatId) {
-      return
-    }
-    const row = attentionRows.find(
-      (item) => item.agent_id === active.agentId && item.chat_id === active.chatId,
-    )
-    if (!row?.updated_at) {
-      return
-    }
-    const key = attentionKey(active.agentId, active.chatId)
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    setReadAt((previous) => {
-      if (previous[key] === row.updated_at) {
-        return previous
+  // markConversationRead records that the user has seen a conversation's current
+  // content. It is called by the pane that is actually being read — the active
+  // tab of a visible chat panel in a visible page — never merely because a tab
+  // is open. A conversation open in the background therefore keeps its dot.
+  const markConversationRead = useCallback(
+    (agentId: string, chatId: string) => {
+      const row = attentionRows.find((item) => item.agent_id === agentId && item.chat_id === chatId)
+      if (!row?.updated_at) {
+        return
       }
-      const next = { ...previous, [key]: row.updated_at }
-      writeStateMerged('agentRead', undefined, next, previous, mergeReadAt, parseReadAt)
-      return next
-    })
-  }, [attentionRows, conversationsState.activeId, conversationsState.tabs])
+      const key = attentionKey(agentId, chatId)
+      setReadAt((previous) => {
+        if (previous[key] !== undefined && Date.parse(previous[key]) >= Date.parse(row.updated_at)) {
+          return previous
+        }
+        const next = { ...previous, [key]: row.updated_at }
+        writeStateMerged('agentRead', undefined, next, previous, mergeReadAt, parseReadAt)
+        return next
+      })
+    },
+    [attentionRows],
+  )
 
   // openConversation is reached from loadSessionList (below) and from every
   // sidebar action, and it keeps the sidebar in step when the tab belongs to
@@ -1339,8 +1346,20 @@ const workbenchValue = useMemo<AgentWorkbench>(
       onSessionResolved,
       loadSessionMeta,
       refreshAttention,
+      markConversationRead,
+      attention: attentionWithLive,
     }),
-    [convStore, accessToken, loadSegment, loadSessionList, sessionLists, onSessionResolved, refreshAttention],
+    [
+      convStore,
+      accessToken,
+      loadSegment,
+      loadSessionList,
+      sessionLists,
+      onSessionResolved,
+      refreshAttention,
+      markConversationRead,
+      attentionWithLive,
+    ],
   )
   return (
     <AgentWorkbenchProvider value={workbenchValue}>
@@ -1471,6 +1490,10 @@ function parseAgentsPane(value: unknown): AgentsPaneTab | null {
 
 function parseStringList(value: unknown): string[] | null {
   return Array.isArray(value) && value.every((item) => typeof item === 'string') ? value : null
+}
+
+function parseTimestamp(value: unknown): string | null {
+  return typeof value === 'string' && value !== '' ? value : null
 }
 
 function parseReadAt(value: unknown): ReadAt | null {
@@ -1921,11 +1944,13 @@ function AgentsPanel() {
 // user, so a background turn is never invisible.
 function ConversationTabs({
   state,
+  attention,
   onActivate,
   onClose,
   onNew,
 }: {
   state: ConversationsState
+  attention: AttentionIndex
   onActivate: (id: string) => void
   onClose: (id: string) => void
   onNew: () => void
@@ -1936,6 +1961,13 @@ function ConversationTabs({
       {state.tabs.map((tab) => {
         const summary = state.summaries[tab.id] ?? EMPTY_SUMMARY
         const active = tab.id === state.activeId
+        // Finished-but-unread, exactly like a sidebar row: a background tab that
+        // ran a turn while the reader was elsewhere keeps its dot until they
+        // switch to it.
+        const unread =
+          !summary.busy &&
+          !summary.awaitingInput &&
+          Boolean(tab.chatId && attention.conversations[attentionKey(tab.agentId, tab.chatId)]?.unread)
         return (
           <div
             key={tab.id}
@@ -1957,6 +1989,13 @@ function ConversationTabs({
               ) : null}
               {summary.awaitingInput ? (
                 <span className="size-1.5 shrink-0 rounded-full bg-info" title={t('agent.tabs.awaiting')} />
+              ) : null}
+              {unread ? (
+                <span
+                  data-tab-unread="1"
+                  className="size-1.5 shrink-0 rounded-full bg-success"
+                  title={t('agent.tabs.unread')}
+                />
               ) : null}
               <span className="shrink-0 font-medium">{tab.agentName}</span>
               <span className="truncate opacity-70">{tab.title || t('agent.newConversation')}</span>
@@ -1999,8 +2038,29 @@ function ConversationTabs({
 // Panes stay mounted while their tab is open — that is what makes switching
 // instant (no reconnect, no reload) and lets a background conversation keep
 // streaming. Only the active pane is displayed.
-function ConversationPane({ tab, active, onConversationGone }: { tab: ConversationTab; active: boolean; onConversationGone: () => void }) {
-  const { store, token, loadSegment, loadSessionList, sessionLists, onSessionResolved, loadSessionMeta, refreshAttention } = useConversations()
+function ConversationPane({
+  tab,
+  active,
+  panelVisible,
+  onConversationGone,
+}: {
+  tab: ConversationTab
+  active: boolean
+  /** The chat panel itself is on screen (not hidden behind another mobile tab or dock). */
+  panelVisible: boolean
+  onConversationGone: () => void
+}) {
+  const {
+    store,
+    token,
+    loadSegment,
+    loadSessionList,
+    sessionLists,
+    onSessionResolved,
+    loadSessionMeta,
+    refreshAttention,
+    markConversationRead,
+  } = useConversations()
   const { agents } = useWorkbench()
   // The user's pick in this pane, and nothing else: the conversation's own
   // remembered mode is read from its session below, and the agent's default
@@ -2134,6 +2194,12 @@ function ConversationPane({ tab, active, onConversationGone }: { tab: Conversati
   // conversation's tab.
   // Deduces to a boolean so publishing once per streamed token is impossible.
   const started = chat.messages.length > 0
+  // Reading is a claim about the user's attention: this tab is the active one,
+  // the panel has a box, and the browser page is visible. Anything less (a tab
+  // open in the background, the phone showing the files panel, the browser tab
+  // hidden) keeps the conversation unread.
+  const documentVisible = useDocumentVisible()
+  const reading = isReadingConversation({ tabActive: active, panelVisible, documentVisible })
 
   useEffect(() => {
     store.publishSummary(tab.id, {
@@ -2144,6 +2210,7 @@ function ConversationPane({ tab, active, onConversationGone }: { tab: Conversati
       awaitingInput: Boolean(chat.pendingQuestion) || Boolean(chat.pendingApproval),
       contextUsage: chat.contextUsage,
       started,
+      reading,
     })
   }, [
     store,
@@ -2157,7 +2224,19 @@ function ConversationPane({ tab, active, onConversationGone }: { tab: Conversati
     chat.pendingApproval,
     chat.contextUsage,
     started,
+    reading,
   ])
+
+  // Only a conversation that is actually being read advances its read mark. The
+  // effect re-runs whenever the snapshot changes, so content that arrives while
+  // the reader is on the page is marked read as soon as it is on screen; content
+  // that arrives while the tab is in the background is not.
+  useEffect(() => {
+    if (!reading || !tab.chatId) {
+      return
+    }
+    markConversationRead(tab.agentId, tab.chatId)
+  }, [reading, tab.agentId, tab.chatId, markConversationRead])
 
   // The session the socket runs on belongs to the tab: a fresh conversation only
   // learns its id here, and without the conversation key the sidebar row it now
@@ -2265,7 +2344,7 @@ function ConversationPane({ tab, active, onConversationGone }: { tab: Conversati
 // open conversation. Narrow viewports show a single conversation (no strip),
 // matching the workbench's mobile layout.
 function ConversationHost() {
-  const { store } = useConversations()
+  const { store, attention } = useConversations()
   const { newConversation } = useWorkbench()
   const state = useConversationsState()
   const { t } = useTranslation()
@@ -2289,18 +2368,25 @@ function ConversationHost() {
   // the user switches between, and concurrent segment reads are limited by the
   // gate in useAgent.
   const panes = state.tabs
+  // Whether the chat panel itself is on screen. The workbench keeps every panel
+  // mounted (hidden panels sit in a `display:none` vault), so "the tab is active"
+  // is not enough to claim the user is reading it — a phone showing the files
+  // panel still has this component in the tree.
+  const layerRef = useRef<HTMLDivElement | null>(null)
+  const panelVisible = useIsLaidOut(layerRef, state.activeId)
 
   return (
     <div className="flex h-full min-h-0 flex-col">
       {!narrow ? (
         <ConversationTabs
           state={state}
+          attention={attention}
           onActivate={(id) => store.activate(id)}
           onClose={(id) => store.close(id)}
           onNew={newConversation}
         />
       ) : null}
-      <div className="relative min-h-0 flex-1">
+      <div ref={layerRef} className="relative min-h-0 flex-1">
         {panes.map((tab) => (
           <div
             key={tab.id}
@@ -2314,6 +2400,7 @@ function ConversationHost() {
             <ConversationPane
               tab={tab}
               active={tab.id === state.activeId}
+              panelVisible={panelVisible}
               onConversationGone={() => closeGoneConversation(tab.id)}
             />
           </div>

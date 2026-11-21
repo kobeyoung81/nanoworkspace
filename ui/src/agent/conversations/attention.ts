@@ -12,7 +12,7 @@
 // without a browser: it only turns the two sources into the dots a row renders.
 
 import type { SessionSummary } from '../lib/api'
-import { isUnread } from '../lib/unread'
+import { isUnread, unreadSinceBaseline } from '../lib/unread'
 import type { ConversationTab, TabSummary } from './store'
 
 /** One conversation's attention flags: waiting, running, and unread. */
@@ -78,35 +78,24 @@ function agentsFromConversations(conversations: Record<string, Attention>): Reco
  * which is treated as read: otherwise the first render of a fresh browser would
  * light up every historical conversation.
  */
-export function indexAttention(rows: ConversationAttention[], readAt: ReadAt = {}): AttentionIndex {
+export function indexAttention(
+  rows: ConversationAttention[],
+  readAt: ReadAt = {},
+  baselineAt = '',
+): AttentionIndex {
   const conversations: Record<string, Attention> = {}
   for (const row of rows) {
     const key = attentionKey(row.agent_id, row.chat_id)
+    const seen = readAt[key]
     conversations[key] = {
       running: row.running,
       awaiting: row.awaiting,
-      unread: isUnread(row.updated_at ?? '', readAt[key]),
+      unread: seen
+        ? isUnread(row.updated_at ?? '', seen)
+        : unreadSinceBaseline(row.updated_at ?? '', baselineAt),
     }
   }
   return { conversations, agents: agentsFromConversations(conversations) }
-}
-
-/**
- * Fills in readAt for conversations this browser has not seen before, using
- * their current server timestamp. The first snapshot therefore establishes a
- * baseline instead of marking the whole history unread.
- */
-export function nextReadAt(rows: ConversationAttention[], previous: ReadAt): ReadAt {
-  let next: ReadAt | null = null
-  for (const row of rows) {
-    const key = attentionKey(row.agent_id, row.chat_id)
-    if (!row.updated_at || previous[key]) {
-      continue
-    }
-    next ??= { ...previous }
-    next[key] = row.updated_at
-  }
-  return next ?? previous
 }
 
 /**
@@ -135,9 +124,16 @@ export function applyLiveAttention(
     if (!summary) {
       continue
     }
-    // The user is looking at this conversation, so nothing about it is unread,
-    // whatever the snapshot compared against.
-    const live = { running: summary.busy, awaiting: summary.awaitingInput, unread: false }
+    // The browser knows better than the snapshot only about *activity*: a turn
+    // that has finished, or a question that is waiting. Unread is different — it
+    // clears only while the conversation is actually being read, which an open
+    // tab in the background is not.
+    const known = tab.chatId ? index.conversations[attentionKey(tab.agentId, tab.chatId)] : undefined
+    const live = {
+      running: summary.busy,
+      awaiting: summary.awaitingInput,
+      unread: summary.reading ? false : Boolean(known?.unread),
+    }
     if (tab.chatId) {
       conversations[attentionKey(tab.agentId, tab.chatId)] = live
     } else {

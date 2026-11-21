@@ -1,8 +1,8 @@
 /* eslint-disable react-refresh/only-export-components */
 // Context modules export providers alongside hooks by design; the fast-refresh
 // boundary concern does not apply to this module.
-import { createContext, useContext, useSyncExternalStore, type ReactNode } from 'react'
-import { useMemo } from 'react'
+import { createContext, useContext, useMemo, useSyncExternalStore, type ReactNode } from 'react'
+import type { AttentionIndex } from './attention'
 import { EMPTY_SUMMARY, type ConversationsState, type ConversationsStore, type TabSummary } from './store'
 import type { SessionLists } from './sessionLists'
 import type { LoadedSegment } from '../hooks/useAgent'
@@ -29,6 +29,14 @@ export type ConversationsContextValue = {
   refreshAttention: () => void
   /** Records the conversation a socket is running (fresh chats, splits). */
   onSessionResolved: (agentId: string, sessionId: string | null) => void
+  /**
+   * Records that the user has seen a conversation's current content. Only a pane
+   * that is genuinely being read may call it (active tab, visible panel, visible
+   * page) — an open tab in the background is not reading.
+   */
+  markConversationRead: (agentId: string, chatId: string) => void
+  /** The attention index the sidebar, agent rows and tabs render their dots from. */
+  attention: AttentionIndex
 }
 
 const ConversationsCtx = createContext<ConversationsContextValue | null>(null)

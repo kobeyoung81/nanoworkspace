@@ -65,6 +65,13 @@ export type TabSummary = {
    * over by another conversation.
    */
   started: boolean
+  /**
+   * Whether the user is actually looking at this conversation right now: the tab
+   * is active, the chat panel has a layout box (the workbench keeps hidden panels
+   * mounted under `display:none`) and the browser page is visible. Opening a tab
+   * in the background is not reading it, and the unread badge must survive that.
+   */
+  reading: boolean
 }
 
 export type ConversationsState = {
@@ -81,6 +88,7 @@ export const EMPTY_SUMMARY: TabSummary = {
   awaitingInput: false,
   contextUsage: null,
   started: false,
+  reading: false,
 }
 
 /**
