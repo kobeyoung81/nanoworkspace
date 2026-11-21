@@ -2796,17 +2796,28 @@ function AgentWindow({
   // panels) drops it — the transcript then sits at the oldest row forever. Settle
   // explicitly, once per show; a reader parked mid-history keeps their row.
   const hasGroups = groups.length > 0
+  // While the pane is being put back, follow-the-newest is off: the list mounts
+  // while the panel is still being measured, and a zero-height viewport reads as
+  // "at the bottom", which would drag the restore to the newest row.
+  const [settling, setSettling] = useState(false)
   useEffect(() => {
     if (!laidOut || !hasGroups || settledRef.current) {
       return
     }
     settledRef.current = true
-    let inner = 0
-    const outer = window.requestAnimationFrame(() => {
-      inner = window.requestAnimationFrame(() => {
+    setSettling(true)
+    let raf = 0
+    let frames = 0
+    let release = 0
+    const step = () => {
+      frames += 1
+      // Wait for a real viewport: the mount may happen in the frame the panel is
+      // re-parented out of the vault, where every measurement is zero.
+      const scroller = paneRef.current?.querySelector<HTMLElement>('[data-transcript] > div')
+      const ready = scroller !== null && scroller !== undefined && scroller.clientHeight > 40
+      if (ready || frames > 30) {
         // Assert the target instead of trusting the mount: `initialTopMostItemIndex`
-        // is read once, and a mount taken before the pane had a measured box — the
-        // workbench vault, a phone switching panels — drops it.
+        // is read once, and a mount taken before the pane had a measured box drops it.
         const target = restoreTarget(position, (key) => indexOfKey(indexState.first, keys, key))
         listRef.current?.scrollToIndex(target)
         recordDiag('transcript.settle', {
@@ -2814,12 +2825,17 @@ function AgentWindow({
           index: target.index,
           keys: keys.length,
           first: indexState.first,
+          frames,
         })
-      })
-    })
+        release = window.setTimeout(() => setSettling(false), 150)
+        return
+      }
+      raf = window.requestAnimationFrame(step)
+    }
+    raf = window.requestAnimationFrame(step)
     return () => {
-      window.cancelAnimationFrame(outer)
-      window.cancelAnimationFrame(inner)
+      window.cancelAnimationFrame(raf)
+      window.clearTimeout(release)
     }
   }, [laidOut, hasGroups, position, keys.length, indexState.first, keys])
 
@@ -3000,7 +3016,7 @@ function AgentWindow({
                 // background walk normally has it in memory already, so this is
                 // mostly the retry affordance.
                 startReached={() => onLoadOlder?.()}
-                followOutput={(atBottom) => (atBottom ? 'auto' : false)}
+                followOutput={(atBottom) => (!settling && atBottom ? 'auto' : false)}
                 // A conversation shorter than the pane reads from the TOP: the first
                 // message of a new conversation belongs beside the header, not pressed
                 // against the composer. (The empty screen is rendered above, so it is
