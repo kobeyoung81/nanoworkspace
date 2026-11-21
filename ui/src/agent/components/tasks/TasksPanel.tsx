@@ -186,7 +186,10 @@ export function TasksPanel(_props?: { ctx?: unknown }) {
   const [cronTasks, setCronTasks] = useState<CronTask[]>([])
   const [confirming, setConfirming] = useState<{ kind: ConfirmKind; id: string } | null>(null)
   const [split, setSplit] = useState<number>(() =>
-    readState<number>('layout', SPLIT_KEY, (raw) => (typeof raw === 'number' ? raw : null), SPLIT_DEFAULT),
+    Math.max(
+      SPLIT_MIN,
+      readState<number>('layout', SPLIT_KEY, (raw) => (typeof raw === 'number' ? raw : null), SPLIT_DEFAULT),
+    ),
   )
   const rootRef = useRef<HTMLDivElement>(null)
 
