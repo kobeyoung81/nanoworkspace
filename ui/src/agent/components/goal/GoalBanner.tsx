@@ -187,7 +187,7 @@ export function GoalBanner({ sessionKey, messages }: Props) {
               {t('goal.banner.cancel', { defaultValue: '叫停' })}
             </Button>
           ) : null}
-          <Button size="sm" variant="ghost" className="h-6 px-1" onClick={() => setOpen((v) => !v)}>
+          <Button size="sm" variant="ghost" className="h-6 px-1" onClick={() => setOpen((v) => !v)} data-goal-banner-toggle>
             {open ? <ChevronUp className="size-3.5" /> : <ChevronDown className="size-3.5" />}
           </Button>
         </span>
