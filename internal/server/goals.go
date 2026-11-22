@@ -141,9 +141,10 @@ func (s *Server) handleGoalCreate(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if req.ChatID == "" {
-		if i := strings.Index(req.SessionKey, ":"); i >= 0 {
-			req.ChatID = req.SessionKey[i+1:]
-		}
+		// A key with no channel in it is the chat id itself. Leaving it empty
+		// made the agent's outbound posts fail with "channel and chat_id are
+		// required", so the round ran but nothing it produced ever arrived.
+		req.ChatID = chatOf(req.SessionKey)
 	}
 	if req.Mode == "" {
 		req.Mode = "build"
