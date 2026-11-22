@@ -25,7 +25,7 @@ func (p PlanParts) OK() bool {
 var headingPattern = regexp.MustCompile(`^#{1,3}\s*(.+?)\s*$`)
 
 // stepPattern strips "1." / "1、" / "-" / "*" from a list line.
-var stepPattern = regexp.MustCompile(`^\s*(?:[-*+]|\d+[.)、．])\s+(.*\S)\s*$`)
+var stepPattern = regexp.MustCompile(`^\s*(?:[-*+]|\d+[.)、．])\s*(.*\S)\s*$`)
 
 // planSections names the headings this parser understands. The plan prompt asks
 // for the Chinese ones; the English ones are accepted because a model that

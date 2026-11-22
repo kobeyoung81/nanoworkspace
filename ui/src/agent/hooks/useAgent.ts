@@ -1246,7 +1246,8 @@ export function useAgent(
     return 'queued'
   }, [])
 
-  const send = useCallback((content: string, mode: AgentMode = 'build', media: ChatMediaItem[] = []) => {
+  const send = useCallback(
+    (content: string, mode: AgentMode = 'build', media: ChatMediaItem[] = [], extra?: Record<string, unknown>) => {
     const trimmed = content.trim()
     if (!trimmed && media.length === 0) {
       return
@@ -1266,8 +1267,12 @@ export function useAgent(
         pending: true,
       },
     ])
-    sendFrame({ type: 'message', content: trimmed, media, metadata: { agent_mode: mode } })
-  }, [sendFrame])
+    // `extra` carries the turn's own binding (the goal draft an intake turn
+    // fills) next to the mode the agent needs to resolve its tools.
+    sendFrame({ type: 'message', content: trimmed, media, metadata: { agent_mode: mode, ...extra } })
+  },
+    [sendFrame],
+  )
 
   const clear = useCallback(() => {
     setMessages([])

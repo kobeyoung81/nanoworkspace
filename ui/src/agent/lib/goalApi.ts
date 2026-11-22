@@ -58,6 +58,8 @@ export type Goal = {
 export type DraftView = {
   draft: Goal
   verdict: GoalVerdict
+  /** What the last write actually stored, per check (see the workspace). */
+  stored?: Record<string, string>
 }
 
 function base(): string {
@@ -84,13 +86,26 @@ export function createDraft(
   )
 }
 
-/** answerDraft fills one of the six checks. */
+/** answerDraft fills one of the six checks (the card's inline edit). */
 export function answerDraft(id: string, check: string, value: string): Promise<DraftView> {
+  return answerDrafts(id, [{ check, value }])
+}
+
+/** DraftAnswer is one entry of a round: a check and what the user said. */
+export type DraftAnswer = { check: string; value: string | string[] }
+
+/** answerDrafts writes one round of answers in one request. */
+export function answerDrafts(id: string, answers: DraftAnswer[]): Promise<DraftView> {
   return getHost().api.post<DraftView>(
-    `/goals/drafts/${encodeURIComponent(id)}/answer`,
-    { check, value },
+    `/goals/drafts/${encodeURIComponent(id)}/answers`,
+    { answers },
     base(),
   )
+}
+
+/** getDraft reads the draft as it is now; polling it keeps the card current. */
+export function getDraft(id: string): Promise<DraftView> {
+  return getHost().api.get<DraftView>(`/goals/drafts/${encodeURIComponent(id)}`, base())
 }
 
 /** patchDraft edits several fields at once (title, condition, constraints…). */

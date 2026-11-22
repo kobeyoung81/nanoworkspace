@@ -40,7 +40,10 @@ func (s *Server) registerGoalRoutes(mux *http.ServeMux, prefix string) {
 	// The creation surface: a draft, its answers and the start button.
 	mux.HandleFunc("POST "+prefix+"/goals/drafts", s.handleDraftCreate)
 	mux.HandleFunc("PATCH "+prefix+"/goals/drafts/{id}", s.handleDraftPatch)
+	// The card polls one draft; the intake turn writes a whole round at once.
+	mux.HandleFunc("GET "+prefix+"/goals/drafts/{id}", s.handleDraftGet)
 	mux.HandleFunc("POST "+prefix+"/goals/drafts/{id}/answer", s.handleDraftAnswer)
+	mux.HandleFunc("POST "+prefix+"/goals/drafts/{id}/answers", s.handleDraftAnswers)
 	mux.HandleFunc("POST "+prefix+"/goals/drafts/{id}/start", s.handleDraftStart)
 	mux.HandleFunc("GET "+prefix+"/goals", s.handleGoalList)
 	mux.HandleFunc("GET "+prefix+"/goals/{id}", s.handleGoalGet)

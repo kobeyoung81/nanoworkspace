@@ -10,7 +10,7 @@ import { AlertTriangle, CheckCircle2, Pencil, Target, X } from 'lucide-react'
 
 import { cn } from '../../lib/utils'
 import { Button } from '../ui/button'
-import { answerDraft, createDraft, startDraft, type DraftView, type Goal } from '../../lib/goalApi'
+import { answerDraft, createDraft, getDraft, startDraft, type DraftView, type Goal } from '../../lib/goalApi'
 
 type Props = {
   agentId: string
@@ -119,6 +119,33 @@ export function GoalDraft({ agentId, sessionKey, planRef, initialCondition, init
       cancelled = true
     }
   }, [agentId, sessionKey, planRef, initialCondition, initial])
+
+  // The draft is a server object and the intake turn writes into it behind this
+  // card's back: without a poll the card kept showing the snapshot it opened
+  // with, so a filled-in draft still looked empty and never offered「开始」.
+  useEffect(() => {
+    const id = view?.draft.id
+    if (!id) return
+    let cancelled = false
+    const poll = async () => {
+      if (document.visibilityState !== 'visible') return
+      // An inline editor owns the text while it is open; a poll replacing the
+      // value under it would eat what the reader is typing.
+      if (editing !== null || busy) return
+      try {
+        const next = await getDraft(id)
+        if (!cancelled) setView(next)
+      } catch {
+        // Keep the last view: a failed poll is not a reason to blank the card.
+      }
+    }
+    const timer = window.setInterval(() => void poll(), 3000)
+    void poll()
+    return () => {
+      cancelled = true
+      window.clearInterval(timer)
+    }
+  }, [view?.draft.id, editing, busy])
 
   const answer = useCallback(
     async (check: string, value: string) => {

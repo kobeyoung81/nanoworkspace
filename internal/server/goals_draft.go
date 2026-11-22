@@ -50,18 +50,33 @@ type draftPatch struct {
 }
 
 // draftAnswer is one answer to one of the six checks.
+//
+// Value is raw JSON because a caller may send the plain text the user typed or
+// the structure the same field keeps (proof steps with their kind, a budget as
+// {"rounds":3,"minutes":10}); decoding both here keeps one wire shape.
 type draftAnswer struct {
-	Check string `json:"check"`
-	Value string `json:"value"`
+	Check string          `json:"check"`
+	Value json.RawMessage `json:"value"`
 	// UserID is only honoured on an internal call (the intake turn has no
 	// browser token and writes on behalf of the conversation's owner).
 	UserID string `json:"user_id,omitempty"`
+}
+
+// draftAnswers is the batch body: one intake round's answers in one write.
+type draftAnswers struct {
+	Answers []draftAnswer `json:"answers"`
+	UserID  string        `json:"user_id,omitempty"`
 }
 
 // draftView is what the card renders: the draft plus the six-check verdict.
 type draftView struct {
 	Draft   *store.Goal  `json:"draft"`
 	Verdict goal.Verdict `json:"verdict"`
+	// Stored says, per check, what actually landed. It exists because a write
+	// can succeed and change nothing the checks accept — a budget of "you
+	// decide" parses to zero rounds, so the model would be told "saved" and the
+	// user would be asked the same question again.
+	Stored map[string]string `json:"stored,omitempty"`
 	// Approach is stored on the goal's title field? No: it is derived from the
 	// plan reference and the condition's "how", so it is returned separately.
 	Approach string `json:"approach,omitempty"`
@@ -195,48 +210,76 @@ func (s *Server) handleDraftPatch(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, s.draftView(updated))
 }
 
+// handleDraftAnswer writes one answer (the card's own inline edit).
 func (s *Server) handleDraftAnswer(w http.ResponseWriter, r *http.Request) {
 	var a draftAnswer
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 64<<10)).Decode(&a); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request body"})
 		return
 	}
-	// The intake turn runs in the agent container and writes the answers back, so
-	// this endpoint accepts the internal token as well as a browser session.
-	g, ok := s.loadDraftFor(w, r, strings.TrimSpace(a.UserID))
+	s.applyDraftAnswers(w, r, []draftAnswer{a}, strings.TrimSpace(a.UserID))
+}
+
+// handleDraftAnswers writes one intake round's answers in one write.
+//
+// One call per round instead of one per question: the model gets the answers
+// together, and a round that fills three checks costs one request, not three.
+func (s *Server) handleDraftAnswers(w http.ResponseWriter, r *http.Request) {
+	var body draftAnswers
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 128<<10)).Decode(&body); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request body"})
+		return
+	}
+	if len(body.Answers) == 0 {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "answers is required"})
+		return
+	}
+	if len(body.Answers) > len(goal.CheckNames) {
+		writeJSON(w, http.StatusBadRequest, map[string]string{
+			"error": fmt.Sprintf("at most %d answers, one per check", len(goal.CheckNames)),
+		})
+		return
+	}
+	s.applyDraftAnswers(w, r, body.Answers, strings.TrimSpace(body.UserID))
+}
+
+// handleDraftGet is the confirmation card's read.
+//
+// Polling it is what keeps the card from showing the snapshot it happened to
+// open with: the intake turn writes into the same server object behind the
+// card's back.
+func (s *Server) handleDraftGet(w http.ResponseWriter, r *http.Request) {
+	g, ok := s.loadDraft(w, r)
 	if !ok {
 		return
 	}
-	value := strings.TrimSpace(a.Value)
+	writeJSON(w, http.StatusOK, s.draftView(g))
+}
+
+// applyDraftAnswers validates every answer, writes the lot in one update, and
+// answers with the new view plus what each field actually holds.
+func (s *Server) applyDraftAnswers(w http.ResponseWriter, r *http.Request, answers []draftAnswer, internalUserID string) {
+	g, ok := s.loadDraftFor(w, r, internalUserID)
+	if !ok {
+		return
+	}
 	patch := store.DraftPatch{}
-	switch a.Check {
-	case goal.CheckCondition:
-		patch.Condition = &value
-	case goal.CheckProof:
-		steps := []store.ProofStep{}
-		for _, line := range strings.Split(value, "\n") {
-			if line = strings.TrimSpace(line); line != "" {
-				steps = append(steps, store.ProofStep{Kind: "note", Note: line})
-			}
+	stored := map[string]string{}
+	for _, a := range answers {
+		check, known := goal.NormalizeCheck(a.Check)
+		if !known {
+			writeJSON(w, http.StatusBadRequest, map[string]string{
+				"error": fmt.Sprintf("check %q is not one of %s", a.Check, goal.CheckKeys()),
+			})
+			return
 		}
-		patch.Proof = &steps
-	case goal.CheckApproach:
-		patch.Title = &value
-	case goal.CheckConstraints:
-		items := []string{}
-		for _, line := range strings.Split(value, "\n") {
-			if line = strings.TrimSpace(line); line != "" {
-				items = append(items, line)
-			}
+		if err := fillAnswer(check, a.Value, &patch, stored); err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+			return
 		}
-		patch.Constraints = &items
-	case goal.CheckBudget:
-		rounds, minutes := parseBudget(value)
-		patch.MaxRounds, patch.MaxMinutes = &rounds, &minutes
-	case goal.CheckPermission:
-		// The sixth check is the host's answer; nothing to store.
-	default:
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "unknown check " + a.Check})
+	}
+	if patchEmpty(patch) {
+		writeJSON(w, http.StatusOK, s.draftViewWith(g, stored))
 		return
 	}
 	if err := s.goals.UpdateDraft(r.Context(), g.UserID, g.ID, patch); err != nil {
@@ -248,7 +291,179 @@ func (s *Server) handleDraftAnswer(w http.ResponseWriter, r *http.Request) {
 		s.writeGoalError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, s.draftView(updated))
+	writeJSON(w, http.StatusOK, s.draftViewWith(updated, stored))
+}
+
+// fillAnswer turns one answer into draft fields and records what landed.
+//
+// An answer that carries nothing is not written at all: writing first and
+// letting the check fail afterwards is how a budget of "you decide" used to
+// overwrite a good one with zero.
+func fillAnswer(check string, raw json.RawMessage, patch *store.DraftPatch, stored map[string]string) error {
+	switch check {
+	case goal.CheckCondition:
+		v, err := answerText(raw)
+		if err != nil {
+			return err
+		}
+		if v == "" {
+			stored[check] = "空，未写入"
+			return nil
+		}
+		patch.Condition = &v
+		stored[check] = v
+	case goal.CheckProof:
+		steps, err := answerProof(raw)
+		if err != nil {
+			return err
+		}
+		if len(steps) == 0 {
+			stored[check] = "空，未写入"
+			return nil
+		}
+		patch.Proof = &steps
+		stored[check] = fmt.Sprintf("%d 条", len(steps))
+	case goal.CheckApproach:
+		v, err := answerText(raw)
+		if err != nil {
+			return err
+		}
+		if v == "" {
+			stored[check] = "空，未写入"
+			return nil
+		}
+		patch.Title = &v
+		stored[check] = v
+	case goal.CheckConstraints:
+		items, err := answerLines(raw)
+		if err != nil {
+			return err
+		}
+		if len(items) == 0 {
+			stored[check] = "空，未写入"
+			return nil
+		}
+		patch.Constraints = &items
+		stored[check] = fmt.Sprintf("%d 条", len(items))
+	case goal.CheckBudget:
+		rounds, minutes, given, err := answerBudget(raw)
+		if err != nil {
+			return err
+		}
+		if rounds <= 0 || minutes <= 0 {
+			stored[check] = "空，未写入"
+			return nil
+		}
+		patch.MaxRounds, patch.MaxMinutes = &rounds, &minutes
+		stored[check] = fmt.Sprintf("%d 轮 / %d 分钟", rounds, minutes)
+		if !given {
+			// "你定" is an answer: it takes the default, and the caller is told
+			// which numbers it got instead of guessing.
+			stored[check] += "（默认）"
+		}
+	case goal.CheckPermission:
+		// The sixth check is the host's answer; nothing to store.
+		stored[check] = "host"
+	}
+	return nil
+}
+
+// patchEmpty reports whether an answer round changed no field at all.
+func patchEmpty(p store.DraftPatch) bool {
+	return p.Title == nil && p.Condition == nil && p.Proof == nil &&
+		p.Constraints == nil && p.PlanRef == nil && p.Mode == nil &&
+		p.MaxRounds == nil && p.MaxMinutes == nil
+}
+
+// answerText reads a value that is one string, or a list joined by newlines.
+func answerText(raw json.RawMessage) (string, error) {
+	if len(raw) == 0 || string(raw) == "null" {
+		return "", fmt.Errorf("value is required")
+	}
+	var text string
+	if err := json.Unmarshal(raw, &text); err == nil {
+		return strings.TrimSpace(text), nil
+	}
+	lines, err := answerLines(raw)
+	if err != nil {
+		return "", fmt.Errorf("value must be a string or a list of strings")
+	}
+	return strings.Join(lines, "\n"), nil
+}
+
+// answerLines reads a list of items, or a string with one item per line.
+func answerLines(raw json.RawMessage) ([]string, error) {
+	if len(raw) == 0 || string(raw) == "null" {
+		return nil, fmt.Errorf("value is required")
+	}
+	var items []string
+	if err := json.Unmarshal(raw, &items); err == nil {
+		out := make([]string, 0, len(items))
+		for _, item := range items {
+			if item = strings.TrimSpace(item); item != "" {
+				out = append(out, item)
+			}
+		}
+		return out, nil
+	}
+	var text string
+	if err := json.Unmarshal(raw, &text); err != nil {
+		return nil, fmt.Errorf("value must be a string or a list of strings")
+	}
+	out := make([]string, 0, 4)
+	for _, line := range strings.Split(text, "\n") {
+		if line = strings.TrimSpace(line); line != "" {
+			out = append(out, line)
+		}
+	}
+	return out, nil
+}
+
+// answerProof reads the structured steps the intake tool sends, or the plain
+// text the card sends (one step per line).
+func answerProof(raw json.RawMessage) ([]store.ProofStep, error) {
+	if len(raw) > 0 && string(raw) != "null" {
+		var steps []store.ProofStep
+		if err := json.Unmarshal(raw, &steps); err == nil && len(steps) > 0 {
+			out := make([]store.ProofStep, 0, len(steps))
+			for _, step := range steps {
+				if step.Kind == "" {
+					step.Kind = "note"
+				}
+				out = append(out, step)
+			}
+			return out, nil
+		}
+	}
+	lines, err := answerLines(raw)
+	if err != nil {
+		return nil, err
+	}
+	return proofSteps(lines), nil
+}
+
+// answerBudget reads {"rounds":3,"minutes":10} or the text the user typed. The
+// third result says whether the text carried numbers at all: "你定" is a real
+// answer, and it takes the default rather than leaving the check empty.
+func answerBudget(raw json.RawMessage) (rounds, minutes int, given bool, err error) {
+	if len(raw) > 0 && string(raw) != "null" {
+		var obj struct {
+			Rounds  int `json:"rounds"`
+			Minutes int `json:"minutes"`
+		}
+		if err := json.Unmarshal(raw, &obj); err == nil && (obj.Rounds > 0 || obj.Minutes > 0) {
+			return obj.Rounds, obj.Minutes, true, nil
+		}
+	}
+	text, err := answerText(raw)
+	if err != nil {
+		return 0, 0, false, err
+	}
+	if text == "" {
+		return 0, 0, false, nil
+	}
+	rounds, minutes = parseBudget(text)
+	return rounds, minutes, budgetPattern.MatchString(text), nil
 }
 
 // handleDraftStart runs the six checks and, when they pass, hands the goal to
@@ -478,6 +693,15 @@ func (s *Server) draftView(g *store.Goal) draftView {
 		d.Approach = g.PlanRef
 	}
 	return draftView{Draft: g, Verdict: goal.Intake(d)}
+}
+
+// draftViewWith is draftView with what the last write actually stored.
+func (s *Server) draftViewWith(g *store.Goal, stored map[string]string) draftView {
+	view := s.draftView(g)
+	if len(stored) > 0 {
+		view.Stored = stored
+	}
+	return view
 }
 
 func (s *Server) writeGoalError(w http.ResponseWriter, err error) {

@@ -32,6 +32,46 @@ var checkLabels = map[string]string{
 	CheckPermission:  "需要你开的权限",
 }
 
+// checkAliases maps what a caller may say onto the six keys.
+//
+// The intake turn speaks Chinese to the user and English to the tool, so both
+// arrive here: a model that writes `check: "怎么证明"` must land on `proof`
+// instead of a 400 that costs a whole round of questions.
+var checkAliases = map[string]string{
+	"condition": CheckCondition, "criteria": CheckCondition, "acceptance": CheckCondition,
+	"完成条件": CheckCondition, "验收": CheckCondition, "验收条件": CheckCondition, "怎么算做完": CheckCondition,
+	"proof": CheckProof, "evidence": CheckProof,
+	"证据": CheckProof, "怎么证明": CheckProof, "证明": CheckProof,
+	"approach": CheckApproach, "steps": CheckApproach, "plan": CheckApproach,
+	"怎么走": CheckApproach, "步骤": CheckApproach, "做法": CheckApproach,
+	"constraints": CheckConstraints, "constraint": CheckConstraints, "limits": CheckConstraints,
+	"不许动": CheckConstraints, "约束": CheckConstraints, "限制": CheckConstraints,
+	"budget": CheckBudget,
+	"预算":     CheckBudget, "轮次": CheckBudget,
+	"permissions": CheckPermission, "permission": CheckPermission,
+	"权限": CheckPermission, "需要你开": CheckPermission, "需要你开的权限": CheckPermission,
+}
+
+// NormalizeCheck turns a key or a label into one of the six names.
+//
+// It exists because the same six are named three ways: the key in the API, the
+// label on the card, and whatever the model decides to write. Anything else is
+// refused, so a typo cannot silently write into the wrong field.
+func NormalizeCheck(raw string) (string, bool) {
+	key := strings.ToLower(strings.TrimSpace(raw))
+	key = strings.TrimSuffix(key, "：")
+	key = strings.TrimSuffix(key, ":")
+	if name, ok := checkAliases[key]; ok {
+		return name, true
+	}
+	return "", false
+}
+
+// CheckKeys is the list NormalizeCheck accepts, for an error a model can act on.
+func CheckKeys() string {
+	return strings.Join([]string{CheckCondition, CheckProof, CheckApproach, CheckConstraints, CheckBudget}, "|")
+}
+
 // DraftFields is what an unfinished goal carries while the user is filling it in.
 type DraftFields struct {
 	Title       string

@@ -94,3 +94,15 @@ func TestParsePlan_TruncatesSteps(t *testing.T) {
 		t.Fatalf("steps = %d, want %d", got, maxPlanSteps)
 	}
 }
+
+// TestParsePlan_StepWithoutASpace covers "3、中间件换签名": a Chinese enumeration
+// mark is often written with no space after it, and the card counts these steps.
+func TestParsePlan_StepWithoutASpace(t *testing.T) {
+	p := ParsePlan("# 计划\n\n## 验收\n全部通过\n\n## 步骤\n1. 替换入口\n2、处理调用\n3．换签名\n")
+	if len(p.Steps) != 3 {
+		t.Fatalf("steps = %#v, want three", p.Steps)
+	}
+	if p.Steps[1] != "处理调用" || p.Steps[2] != "换签名" {
+		t.Errorf("steps = %#v", p.Steps)
+	}
+}

@@ -107,10 +107,12 @@ import {
 } from '../lib/api'
 import { compactThresholdPct } from '../lib/contextRing'
 import { GoalDraft } from '../components/goal/GoalDraft'
-import { GoalCreateBar, GoalSplitCard } from '../components/goal/GoalCreate'
-import { createDraft, listGoals, type DraftView } from '../lib/goalApi'
+import { GoalSplitCard } from '../components/goal/GoalCreate'
+import { PlanCard } from '../components/goal/PlanCard'
+import { createDraft, getDraft, listGoals, type DraftView } from '../lib/goalApi'
 import { GoalBanner } from '../components/goal/GoalBanner'
 import { GoalStatusControl } from '../components/goal/GoalStatusControl'
+import { describeProgress, getIntakeDraft, onIntakeDraftChange, setIntakeDraft } from '../lib/goalIntake'
 import { TasksPanel } from '../components/tasks/TasksPanel'
 import { conversationModeOf, defaultModeOf, resolveAgentMode } from '../lib/agentMode'
 import { getAgentMode, setAgentMode } from '../lib/capabilities'
@@ -2705,6 +2707,12 @@ function AgentWindow({
   const applySuggestionRef = useRef<((value: string) => void) | null>(null)
   const [showTodos, setShowTodos] = useState(false)
   const [showJump, setShowJump] = useState(false)
+  // The conversation's plan: 'unused' means the card under the last message (and
+  // the instruction menu) may offer to turn it into a goal (design §14).
+  const [planState, setPlanState] = useState<'none' | 'unused'>('none')
+  // The plan the message stream's card offers: the same two meta keys the
+  // instruction menu reads (design §14), so the two entries cannot disagree.
+  const [planPath, setPlanPath] = useState('')
   // Whether the viewport sits on the newest row. The list owns that answer: older
   // history lands above the reader as it is read, so "how far from the bottom" is
   // not a question scroll arithmetic can answer on its own.
@@ -2896,8 +2904,23 @@ function AgentWindow({
         ) : (
           <div className="h-4" />
         ),
+      // The plan-completion card sits under the last message and scrolls away
+      // with it (product §5.3): it is the plan this conversation just wrote and
+      // has not turned into a goal yet.
+      Footer: () =>
+        planState === 'unused' && planPath && agentId ? (
+          <div className="px-4 pb-4">
+            <PlanCard
+              agentId={agentId}
+              planPath={planPath}
+              onCreate={(path) =>
+                window.dispatchEvent(new CustomEvent('goal:create', { detail: { planRef: path } }))
+              }
+            />
+          </div>
+        ) : null,
     }),
-    [hasMoreHistory, loadingOlder],
+    [agentId, hasMoreHistory, loadingOlder, planPath, planState],
   )
 
   // The reader's row, read from the rendered rows themselves: the list measures
@@ -2953,7 +2976,6 @@ function AgentWindow({
   // Whether the status control is showing a goal; while it is, the todo counter
   // steps aside (one position, one subject).
   const [goalActive, setGoalActive] = useState(false)
-  const [planState, setPlanState] = useState<'none' | 'unused'>('none')
   const activeConv = useActiveConversation()
   const { fresh: chatFresh } = useChatWorkbench()
   useEffect(() => {
@@ -2963,14 +2985,20 @@ function AgentWindow({
     // 404 and leave a red line in the console for a page that works.
     if (chatFresh || !sessionID || !sessionID.includes(':v')) {
       setPlanState('none')
+      setPlanPath('')
       return
     }
     void loadSessionMeta(sessionID)
       .then((meta) => {
-        if (!cancelled) setPlanState(hasUnusedPlan(meta) ? 'unused' : 'none')
+        if (cancelled) return
+        const unused = hasUnusedPlan(meta)
+        setPlanState(unused ? 'unused' : 'none')
+        setPlanPath(unused ? (meta.planPath ?? '') : '')
       })
       .catch(() => {
-        if (!cancelled) setPlanState('none')
+        if (cancelled) return
+        setPlanState('none')
+        setPlanPath('')
       })
     return () => {
       cancelled = true
@@ -3098,6 +3126,7 @@ function AgentWindow({
       )}
       {statusEvent?.event === 'session_sync' && <SessionSyncNotice key={statusEvent.at} />}
       {taskProgress && taskProgress.length > 0 ? <TaskProgressLine tasks={taskProgress} /> : null}
+      <GoalIntakeProgress />
       {pendingQuestion ? <QuestionCard question={pendingQuestion} onSubmit={onAnswerQuestion} /> : null}
       {pendingApproval ? <ApprovalCard approval={pendingApproval} onSubmit={onAnswerApproval} /> : null}
       <Composer
@@ -3244,6 +3273,48 @@ function TodoStatusIcon({ status }: { status: TodoItem['status'] }) {
 // A share alone collapses on a very short viewport (a phone in landscape), so
 // the cap is floored at 9rem: there the card keeps enough height for one
 // question and the submit button instead of shrinking to a strip.
+// GoalIntakeProgress is the line above the questions while a goal is being
+// filled: "目标补全 3/6 · 还差：预算、不许动" (product §5.2, step 2). It reads the
+// draft the turn is filling — the same server object the confirmation card
+// polls — so the count moves when an answer lands, not when a model says so.
+function GoalIntakeProgress() {
+  const { t } = useTranslation()
+  const [draftId, setDraftId] = useState<string | null>(getIntakeDraft()?.draftId ?? null)
+  const [view, setView] = useState<DraftView | null>(null)
+
+  useEffect(() => onIntakeDraftChange((next) => setDraftId(next?.draftId ?? null)), [])
+
+  useEffect(() => {
+    if (!draftId) {
+      setView(null)
+      return
+    }
+    let cancelled = false
+    const poll = async () => {
+      if (document.visibilityState !== 'visible') return
+      try {
+        const next = await getDraft(draftId)
+        if (!cancelled) setView(next)
+      } catch {
+        // A failed poll keeps the last line rather than blanking it.
+      }
+    }
+    void poll()
+    const timer = window.setInterval(() => void poll(), 4000)
+    return () => {
+      cancelled = true
+      window.clearInterval(timer)
+    }
+  }, [draftId])
+
+  if (!draftId || !view) return null
+  return (
+    <div className="mx-4 mb-1 shrink-0 text-[11px] text-muted-foreground" data-goal-progress>
+      {describeProgress(view.verdict, (key) => t(`goal.check.${key}`, { defaultValue: key }))}
+    </div>
+  )
+}
+
 function QuestionCard({ question, onSubmit }: { question: PendingQuestion; onSubmit: (answers: string[]) => void }) {
   const { t } = useTranslation()
   // Touch devices have no hover: an option that carries a description shows it
@@ -3292,7 +3363,10 @@ function QuestionCard({ question, onSubmit }: { question: PendingQuestion; onSub
   }
 
   return (
-    <div className="mx-4 mb-2 flex max-h-[max(9rem,32%)] shrink-0 flex-col rounded-lg border bg-card p-3 shadow-sm lg:max-h-[max(9rem,40%)]">
+    <div
+      className="mx-4 mb-2 flex max-h-[max(9rem,32%)] shrink-0 flex-col rounded-lg border bg-card p-3 shadow-sm lg:max-h-[max(9rem,40%)]"
+      data-question-card
+    >
       <div className="mb-2 flex shrink-0 items-center gap-2 text-xs font-medium text-muted-foreground">
         <HelpCircle className="size-3.5" />
         {t('agent.question.title')}
@@ -3561,56 +3635,72 @@ function Composer({
   const [goalInitial, setGoalInitial] = useState<DraftView | undefined>(undefined)
   const activeSession = useActiveConversation()
 
-  // The intake turn: a normal conversation message (no `source: goal`), so the
-  // blocking question tool works — nobody is "away". It names the draft and what
-  // is missing; the answers come back through goal_intake_answer.
+  // The intake turn (product §5.2, step 2): an ordinary message — nobody is
+  // away, so the blocking question tool works — that says, in the user's own
+  // voice, what is being filled. The draft rides metadata instead of being
+  // spelled out in the text: the model does not have to copy an id out of a
+  // paragraph, and the tools read the binding from the turn.
   const startIntake = useCallback(
     (view: DraftView) => {
       const missing = view.verdict?.missing ?? []
       if (missing.length === 0) return
       const labels = missing.map((m) => t(`goal.check.${m}`, { defaultValue: m })).join('、')
+      setIntakeDraft({ draftId: view.draft.id, sessionKey: activeConversationKey ?? '' })
       send(
-        `【长程目标 · 补齐】草稿 ${view.draft.id} 还差：${labels}。\n` +
-          '请用 question 工具一次问最多 3 个问题来补齐（每题第一项标「推荐」并给一行理由，允许「其他」）。\n' +
-          `每得到一条回答就调用 goal_intake_answer（draft_id=${view.draft.id}，check 为对应项，value 为用户原话）。\n` +
-          '六项齐全后回一句「可以确认了」，然后在对话里等我确认。',
+        t('goal.intake.message', {
+          defaultValue: '补齐这个长程目标（还差：{{missing}}）',
+          missing: labels,
+        }),
+        'build',
+        [],
+        { goal_draft: view.draft.id },
       )
     },
-    [send, t],
+    [activeConversationKey, send, t],
   )
 
   // The end card and the plan-form status control both ask for the creation flow
   // by event: they live in different panes and cannot call this directly.
   useEffect(() => {
-    const onRequest = () => void openGoalFlowRef.current?.()
+    const onRequest = (event: Event) => {
+      const planRef = (event as CustomEvent<{ planRef?: string } | undefined>).detail?.planRef
+      void openGoalFlowRef.current?.(planRef)
+    }
     window.addEventListener('goal:create', onRequest)
     return () => window.removeEventListener('goal:create', onRequest)
   }, [])
 
-  const openGoalFlow = useCallback(async () => {
+  const openGoalFlow = useCallback(async (planRef?: string) => {
     setGoalPlanRef(undefined)
     setGoalDescription('')
     setGoalInitial(undefined)
-    let planPath: string | undefined
-    if (activeSession.id) {
-      try {
-        const meta = await loadSessionMeta(activeSession.id)
-        if (hasUnusedPlan(meta)) {
-          planPath = meta.planPath
-        }
-      } catch {
-        // No meta is not a reason to block creation: fall through to describing.
-      }
-    }
-    if (planPath) {
-      setGoalPlanRef(planPath)
-      setGoalStage('split')
+    // A plan the reader picked in the message stream goes straight to the
+    // confirmation card: the condition and the evidence are already in it
+    // (product §5.3: "不再问一遍怎么算做完").
+    if (planRef) {
+      setGoalPlanRef(planRef)
+      setGoalStage('confirm')
       return
+    }
+    if (!activeSession.id) {
+      // Nothing to look up: an empty conversation has no plan to reuse.
+      setGoalStage('create')
+      return
+    }
+    try {
+      const meta = await loadSessionMeta(activeSession.id)
+      if (hasUnusedPlan(meta) && meta.planPath) {
+        setGoalPlanRef(meta.planPath)
+        setGoalStage('split')
+        return
+      }
+    } catch {
+      // No meta is not a reason to block creation: fall through to describing.
     }
     setGoalStage('create')
   }, [activeSession.id])
 
-  const openGoalFlowRef = useRef<(() => Promise<void>) | null>(null)
+  const openGoalFlowRef = useRef<((planRef?: string) => Promise<void>) | null>(null)
   useEffect(() => {
     openGoalFlowRef.current = openGoalFlow
   }, [openGoalFlow])
@@ -3834,7 +3924,12 @@ function Composer({
     hasAttachments: attachments.length > 0,
   })
 
-  const placeholder = voiceActive
+  const placeholder =
+    goalStage === 'create'
+      ? t('goal.draft.placeholder', {
+          defaultValue: '描述你要达成什么。能写清怎么算做完和怎么看出来最好。',
+        })
+      : voiceActive
     ? t('composer.voice.listening')
     : connected
       ? trailing === 'mic'
@@ -3895,7 +3990,33 @@ function Composer({
     setAttachments((current) => current.filter((_, i) => i !== index))
   }
 
+  // submitDescription is step one of the creation flow: the sentence typed into
+  // the composer becomes the draft's condition, the draft is created here (not
+  // inside the card) so the intake turn and the card talk about one object, and
+  // the turn that asks the remaining questions starts from it (product §5.2).
+  const submitDescription = () => {
+    const description = draft.trim()
+    if (description === '' || !selectedAgent || !activeConversationKey) return
+    setGoalDescription(description)
+    setDraft('')
+    setGoalStage('confirm')
+    void createDraft(selectedAgent, activeConversationKey, undefined, description)
+      .then((view) => {
+        setGoalInitial(view)
+          startIntake(view)
+      })
+      .catch(() => {
+        // The card opens its own draft: the reader can still fill it by hand.
+      })
+  }
+
   const submitText = () => {
+    // Creating a goal is a filling step, not a message: Enter describes, it does
+    // not send (product §5.2 — "回车不是发送，而是进入追问").
+    if (goalStage === 'create') {
+      submitDescription()
+      return
+    }
     const hasMedia = attachments.length > 0
     if ((!draft.trim() && !hasMedia) || !canSend || uploading || voiceActive) {
       return
@@ -3926,6 +4047,13 @@ function Composer({
       onModeChange(mode === 'build' ? 'plan' : 'build')
       return
     }
+    if (event.key === 'Escape' && goalStage === 'create') {
+      // Leaving creation keeps the sentence: the reader may have typed a lot and
+      // only wanted the menu back.
+      event.preventDefault()
+      setGoalStage('none')
+      return
+    }
     if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
       event.preventDefault()
       submitText()
@@ -3946,25 +4074,6 @@ function Composer({
               onUsePlan={() => setGoalStage('confirm')}
             />
           ) : null}
-          {goalStage === 'create' ? (
-            <GoalCreateBar
-              onClose={() => setGoalStage('none')}
-              onSubmit={(description) => {
-                setGoalDescription(description)
-                setGoalStage('confirm')
-                // Create the draft here (not inside the card) so the intake turn
-                // and the card talk about the same object.
-                void createDraft(selectedAgent, activeConversationKey ?? '', undefined, description)
-                  .then((view) => {
-                    setGoalInitial(view)
-                    startIntake(view)
-                  })
-                  .catch(() => {
-                    // The card creates its own draft if this fails.
-                  })
-              }}
-            />
-          ) : null}
           {goalStage === 'confirm' ? (
             <GoalDraft
               agentId={selectedAgent}
@@ -3972,8 +4081,14 @@ function Composer({
               planRef={goalPlanRef}
               initialCondition={goalDescription}
               initial={goalInitial}
-              onClose={() => setGoalStage('none')}
-              onStarted={() => setGoalStage('none')}
+              onClose={() => {
+                setIntakeDraft(null)
+                setGoalStage('none')
+              }}
+              onStarted={() => {
+                setIntakeDraft(null)
+                setGoalStage('none')
+              }}
             />
           ) : null}
         </>
@@ -4008,7 +4123,37 @@ function Composer({
             is what put text between the buttons. The field's own bottom margin
             reserves that band, and the toolbar's opaque background hides
             anything scrolled behind it. */}
-        <div className="relative z-10 w-full rounded-md border border-input bg-transparent shadow-sm focus-within:ring-2 focus-within:ring-ring">
+        <div
+          className={cn(
+            'relative z-10 w-full rounded-md border bg-transparent shadow-sm focus-within:ring-2 focus-within:ring-ring',
+            // Product §5.2: the whole box takes the accent colour while a goal is
+            // being described, so it reads as "this is not an ordinary message".
+            goalStage === 'create' ? 'border-primary/60 ring-2 ring-primary/30' : 'border-input',
+          )}
+        >
+          {goalStage === 'create' ? (
+            <div
+              className="flex items-center gap-2 border-b border-primary/20 bg-primary/5 px-3 py-1.5 text-xs"
+              data-goal-describe
+            >
+              <Target className="size-3.5 shrink-0 text-primary" />
+              <span className="font-medium">{t('goal.draft.banner', { defaultValue: '◎ 长程目标 · 待描述' })}</span>
+              <span className="min-w-0 flex-1 truncate text-muted-foreground">
+                {t('goal.draft.enterHint', { defaultValue: '回车进入追问；Esc 退出，已输入的文字保留' })}
+              </span>
+              <Button
+                type="button"
+                size="sm"
+                variant="ghost"
+                className="h-6 px-1.5"
+                onClick={() => setGoalStage('none')}
+                data-goal-describe-cancel
+              >
+                <X className="size-3.5" />
+                {t('common.cancel', { defaultValue: '取消' })}
+              </Button>
+            </div>
+          ) : null}
           {voiceActive ? (
             /* While dictating the field is a read-only preview: the underline
                marks text that is not final yet, and the marker at its end names
@@ -4048,6 +4193,7 @@ function Composer({
               onKeyDown={handleKeyDown}
               onPaste={handlePaste}
               placeholder={placeholder}
+              data-composer-input=""
               disabled={!canSend}
               className="mb-12 min-h-[48px] max-h-[152px] w-full resize-none rounded-none border-0 bg-transparent px-3 py-2 shadow-none focus-visible:ring-0"
             />

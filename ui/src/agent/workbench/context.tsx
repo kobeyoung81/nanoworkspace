@@ -116,7 +116,7 @@ export type ChatWorkbench = {
   unloadedSegments: number
   loadingOlder: boolean
   loadOlder: () => void
-  send: (content: string, mode?: AgentMode, media?: ChatMediaItem[]) => void
+  send: (content: string, mode?: AgentMode, media?: ChatMediaItem[], extra?: Record<string, unknown>) => void
   sendCommand: (command: string) => void
   stop: () => void
   todos: TodoItem[]
