@@ -229,18 +229,7 @@ func (s *Store) ListByUser(ctx context.Context, userID string, limit int) ([]*Go
 // retry, a second replica or a manual re-dispatch can never start the same round
 // twice: the first write matches and every later one matches zero rows.
 func (s *Store) ClaimRound(ctx context.Context, userID, id string, round int, now time.Time, lease time.Duration) (bool, error) {
-	expired := now.Add(-lease)
-	result, err := s.db.Collection(goalsCollection).UpdateOne(ctx,
-		bson.D{
-			{Key: "user_id", Value: userID},
-			{Key: "id", Value: id},
-			{Key: "status", Value: goal.Running},
-			{Key: "round", Value: round},
-			{Key: "$or", Value: bson.A{
-				bson.D{{Key: "claimed_at", Value: nil}},
-				bson.D{{Key: "claimed_at", Value: bson.D{{Key: "$lt", Value: expired}}}},
-			}},
-		},
+	result, err := s.db.Collection(goalsCollection).UpdateOne(ctx, claimFilter(userID, id, round, now, lease),
 		bson.D{{Key: "$set", Value: bson.D{
 			{Key: "claimed_at", Value: now.UTC()},
 			{Key: "queue_state", Value: "running"},
@@ -250,6 +239,27 @@ func (s *Store) ClaimRound(ctx context.Context, userID, id string, round int, no
 		return false, fmt.Errorf("claim round: %w", err)
 	}
 	return result.MatchedCount == 1, nil
+}
+
+// claimFilter is the one write that hands a round to the dispatcher.
+//
+// The status clause carries both states a round may start from: a work round
+// from Running and the verification round from Verifying. Leaving Verifying out
+// parked every goal the judge called "met" in the verification state for good —
+// the tick kept finding it due, the claim matched nothing, and nothing moved
+// until the wall-clock budget paused it.
+func claimFilter(userID, id string, round int, now time.Time, lease time.Duration) bson.D {
+	expired := now.Add(-lease)
+	return bson.D{
+		{Key: "user_id", Value: userID},
+		{Key: "id", Value: id},
+		{Key: "status", Value: bson.D{{Key: "$in", Value: bson.A{string(goal.Running), string(goal.Verifying)}}}},
+		{Key: "round", Value: round},
+		{Key: "$or", Value: bson.A{
+			bson.D{{Key: "claimed_at", Value: nil}},
+			bson.D{{Key: "claimed_at", Value: bson.D{{Key: "$lt", Value: expired}}}},
+		}},
+	}
 }
 
 // SetStatus moves a goal from one of the allowed statuses to the target.

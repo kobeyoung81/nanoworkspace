@@ -104,6 +104,38 @@ func TestCreate_GetAndDuplicate(t *testing.T) {
 	}
 }
 
+// TestClaimFilter_AcceptsTheVerificationRound pins the state a round may start
+// from. The verification round runs while the goal is Verifying; claiming only
+// from Running parked every goal the judge called "met" in that state for good.
+func TestClaimFilter_AcceptsTheVerificationRound(t *testing.T) {
+	now := time.Now().UTC()
+	filter := claimFilter("u1", "g_1", 3, now, 5*time.Minute)
+
+	var statuses []string
+	var round int
+	for _, e := range filter {
+		switch e.Key {
+		case "status":
+			in, ok := e.Value.(bson.D)
+			if !ok || len(in) != 1 || in[0].Key != "$in" {
+				t.Fatalf("status clause is not an $in: %#v", e.Value)
+			}
+			for _, v := range in[0].Value.(bson.A) {
+				statuses = append(statuses, v.(string))
+			}
+		case "round":
+			round = e.Value.(int)
+		}
+	}
+	if round != 3 {
+		t.Errorf("round clause = %d, want 3", round)
+	}
+	want := []string{string(goal.Running), string(goal.Verifying)}
+	if len(statuses) != len(want) || statuses[0] != want[0] || statuses[1] != want[1] {
+		t.Errorf("claimable statuses = %v, want %v", statuses, want)
+	}
+}
+
 // TestClaimRound_SecondClaimLoses is the idempotency the scheduler relies on:
 // the same round can only be dispatched once while the claim is live, and
 // becomes claimable again when it expires.
