@@ -1191,7 +1191,12 @@ function SignedInAgent({ userId }: { userId: string }) {
   // newest segment of a conversation while a tab may still be parked on an older
   // one, and those must still highlight as the same row.
   const activeTab = conversationsState.tabs.find((tab) => tab.id === conversationsState.activeId)
-  const activeConversationKey = conversationKeyOf(activeTab?.sessionId ?? selectedSessionId)
+  // The key a conversation is known by, which is what the goal surfaces ask
+  // with. A conversation started in this tab has no session id yet, but the
+  // gateway has named its chat — and that name is the key the first stored
+  // segment will have, so nothing is guessed.
+  const activeConversationKey =
+    conversationKeyOf(activeTab?.sessionId ?? selectedSessionId) ?? activeTab?.chatId ?? null
   const activeTabAgentId = activeTab?.agentId ?? null
   const activeTabSessionId = activeTab?.sessionId ?? null
 
