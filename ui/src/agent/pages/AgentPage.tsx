@@ -2985,8 +2985,9 @@ function AgentWindow({
     // 404 and leave a red line in the console for a page that works.
     // A stored segment is one the server knows (`channel:chat`, with or without
     // a `:vN`): the first turn of a conversation stores `web:<chat>` with no
-    // version, and the old `:v`-only guard hid the plan card for exactly those.
-    if (chatFresh || !sessionID || !isStoredSessionID(sessionID)) {
+    // version. `fresh` (no segment on the tab) is therefore not a reason to
+    // skip — that is exactly the conversation whose plan just got written.
+    if (!sessionID || !isStoredSessionID(sessionID)) {
       setPlanState('none')
       setPlanPath('')
       return
@@ -3006,7 +3007,7 @@ function AgentWindow({
     return () => {
       cancelled = true
     }
-  }, [activeConv.sessionId, activeConv.chatId, chatFresh])
+  }, [activeConv.sessionId, activeConv.chatId])
 
   const handleAtBottom = useCallback((atBottom: boolean) => {
     atBottomRef.current = atBottom
