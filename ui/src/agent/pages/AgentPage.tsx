@@ -2909,7 +2909,7 @@ function AgentWindow({
       // has not turned into a goal yet.
       Footer: () =>
         planState === 'unused' && planPath && agentId ? (
-          <div className="px-4 pb-4">
+          <div className="px-4 pb-4" data-goal-plan-footer="">
             <PlanCard
               agentId={agentId}
               planPath={planPath}
@@ -3050,7 +3050,13 @@ function AgentWindow({
   }, [lastUser, handleSend])
 
   return (
-    <div ref={paneRef} className="flex h-full min-h-0 flex-col">
+    <div
+      ref={paneRef}
+      className="flex h-full min-h-0 flex-col"
+      data-plan-state={planState}
+      data-plan-path={planPath ? 'set' : ''}
+      data-plan-fresh={chatFresh ? '1' : ''}
+    >
       {activeConversationKey ? <GoalBanner sessionKey={activeConversationKey} messages={messages} /> : null}
       <div className="relative min-h-0 flex-1">
         {laidOut ? (
