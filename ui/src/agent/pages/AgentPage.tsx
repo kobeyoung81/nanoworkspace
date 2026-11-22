@@ -3687,12 +3687,15 @@ function Composer({
   // by event: they live in different panes and cannot call this directly.
   useEffect(() => {
     const onRequest = (event: Event) => {
+      // Every open conversation stays mounted, so the event would otherwise
+      // start a draft in each of them: the reader asked in the one on screen.
+      if (!active) return
       const planRef = (event as CustomEvent<{ planRef?: string } | undefined>).detail?.planRef
       void openGoalFlowRef.current?.(planRef)
     }
     window.addEventListener('goal:create', onRequest)
     return () => window.removeEventListener('goal:create', onRequest)
-  }, [])
+  }, [active])
 
   const openGoalFlow = useCallback(async (planRef?: string) => {
     setGoalPlanRef(undefined)
