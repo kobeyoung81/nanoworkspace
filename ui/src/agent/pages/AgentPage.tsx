@@ -2713,6 +2713,15 @@ function AgentWindow({
   // The plan the message stream's card offers: the same two meta keys the
   // instruction menu reads (design §14), so the two entries cannot disagree.
   const [planPath, setPlanPath] = useState('')
+  // A turn that just ended is the one moment the plan can have changed: the
+  // meta read below is keyed on the conversation, so without this the card for a
+  // plan written a minute ago would wait for a reload.
+  const [metaNonce, setMetaNonce] = useState(0)
+  const wasWorking = useRef(working)
+  useEffect(() => {
+    if (wasWorking.current && !working) setMetaNonce((n) => n + 1)
+    wasWorking.current = working
+  }, [working])
   // Whether the viewport sits on the newest row. The list owns that answer: older
   // history lands above the reader as it is read, so "how far from the bottom" is
   // not a question scroll arithmetic can answer on its own.
@@ -3007,7 +3016,7 @@ function AgentWindow({
     return () => {
       cancelled = true
     }
-  }, [activeConv.sessionId, activeConv.chatId])
+  }, [activeConv.sessionId, activeConv.chatId, metaNonce])
 
   const handleAtBottom = useCallback((atBottom: boolean) => {
     atBottomRef.current = atBottom
