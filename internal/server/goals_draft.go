@@ -248,9 +248,23 @@ func (s *Server) handleDraftAnswers(w http.ResponseWriter, r *http.Request) {
 // Polling it is what keeps the card from showing the snapshot it happened to
 // open with: the intake turn writes into the same server object behind the
 // card's back.
+//
+// It reads a goal in any status on purpose. The card is a view: once the goal
+// starts, a poll that was already in flight would otherwise answer 409 and put a
+// red line in a console where nothing is wrong. Writes stay gated in
+// loadDraftFor.
 func (s *Server) handleDraftGet(w http.ResponseWriter, r *http.Request) {
-	g, ok := s.loadDraft(w, r)
+	if !s.goalsReady(w) {
+		return
+	}
+	identity, ok := auth.FromContext(r.Context())
 	if !ok {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+		return
+	}
+	g, err := s.goals.Get(r.Context(), identity.UserID, r.PathValue("id"))
+	if err != nil {
+		s.writeGoalError(w, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, s.draftView(g))
