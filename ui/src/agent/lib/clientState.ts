@@ -73,7 +73,12 @@ export function currentUser(): string | null {
 function tailFor(area: StateArea, suffix?: string): string {
   switch (area) {
     case 'layout':
-      return suffix === 'leftVert' ? 'agent.leftVert' : 'agent.layout.v1'
+      // Two standalone numbers share this area with the layout object; each
+      // needs its own key, because writing a bare number over the layout would
+      // wipe the dock arrangement stored next to it.
+      if (suffix === 'leftVert') return 'agent.leftVert'
+      if (suffix === 'goalTasksSplit') return 'agent.goalTasksSplit'
+      return 'agent.layout.v1'
     case 'tabs':
       return 'agent.tabs.v1'
     case 'lists':
