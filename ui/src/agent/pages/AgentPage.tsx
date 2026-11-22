@@ -181,7 +181,7 @@ import {
 import { messagesFromProvider, parseProviderMessages } from '../lib/historyMessages'
 import { composeAnswer } from '../lib/questionAnswer'
 import { questionPairs } from '../lib/questionRecord'
-import { hasUnusedPlan, parseSessionMeta, loadSessionMeta } from '../lib/sessionMeta'
+import { hasUnusedPlan, isStoredSessionID, parseSessionMeta, loadSessionMeta } from '../lib/sessionMeta'
 import { formatToolArgs } from '../lib/toolDisplay'
 
 // Below this width the workbench switches to its mobile layout; the chat area
@@ -2983,7 +2983,10 @@ function AgentWindow({
     const sessionID = activeConv.id
     // Only a stored, non-fresh segment can have meta; anything else would answer
     // 404 and leave a red line in the console for a page that works.
-    if (chatFresh || !sessionID || !sessionID.includes(':v')) {
+    // A stored segment is one the server knows (`channel:chat`, with or without
+    // a `:vN`): the first turn of a conversation stores `web:<chat>` with no
+    // version, and the old `:v`-only guard hid the plan card for exactly those.
+    if (chatFresh || !sessionID || !isStoredSessionID(sessionID)) {
       setPlanState('none')
       setPlanPath('')
       return
