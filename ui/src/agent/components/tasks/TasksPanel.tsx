@@ -15,10 +15,10 @@ import { HeightResizeHandle } from '../ui/resize-handle'
 import { readState, writeState } from '../../lib/clientState'
 import { useWorkbench } from '../../workbench/context'
 import { GoalConfirmSheet, type ConfirmKind } from '../goal/GoalConfirmSheet'
+import { taskActions } from '../../lib/goalActions'
 import {
   cancelGoal,
   deleteGoal,
-  goalIsActive,
   goalStatusLabel,
   listCronTasks,
   listGoals,
@@ -59,13 +59,12 @@ function ActionRow({
   onDelete: (goal: Goal) => void
 }) {
   const { t } = useTranslation()
-  const running = goal.status === 'running' || goal.status === 'verifying'
-  const paused = goal.status === 'paused'
-  const cancellable = goalIsActive(goal) || goal.status === 'ready' || goal.status === 'draft' || goal.status === 'validating'
+  // One source of truth for what a state offers (lib/goalActions + its test).
+  const actions = taskActions(goal.status)
 
   return (
     <span className="flex shrink-0 items-center gap-0.5">
-      {running ? (
+      {actions.includes('pause') ? (
         <Button
           size="sm"
           variant="ghost"
@@ -79,7 +78,7 @@ function ActionRow({
           <CirclePause className="size-3.5" />
         </Button>
       ) : null}
-      {paused ? (
+      {actions.includes('resume') ? (
         <Button
           size="sm"
           variant="ghost"
@@ -93,7 +92,7 @@ function ActionRow({
           <CirclePlay className="size-3.5" />
         </Button>
       ) : null}
-      {cancellable ? (
+      {actions.includes('cancel') ? (
         <Button
           size="sm"
           variant="ghost"
@@ -138,7 +137,7 @@ function GoalRow({
 }) {
   const { t } = useTranslation()
   return (
-    <li className="border-b px-2.5 py-2 text-xs last:border-b-0" data-task-row={goal.status}>
+    <li className="border-b px-2.5 py-2 text-xs last:border-b-0" data-task-row={goal.status} data-task-id={goal.id}>
       <div className="flex items-start gap-1.5">
         <Target className="mt-0.5 size-3.5 shrink-0 text-primary" />
         <button
@@ -160,17 +159,19 @@ function GoalRow({
         {goal.last_verdict ? <span className="shrink-0">{goal.last_verdict}</span> : null}
         <span className="ml-auto flex shrink-0 items-center gap-0.5">
           <ActionRow goal={goal} busy={busy} onAct={onAct} onDelete={onDelete} />
-          <Button
-            size="sm"
-            variant="ghost"
-            className="h-6 w-6 p-0"
-            onClick={() => onOpen(goal)}
-            title={t('goal.tasks.open', { defaultValue: '打开对话' })}
-            aria-label={t('goal.tasks.open', { defaultValue: '打开对话' })}
-            data-task-action="open"
-          >
-            <MessageSquare className="size-3.5" />
-          </Button>
+          {taskActions(goal.status).includes('open') ? (
+            <Button
+              size="sm"
+              variant="ghost"
+              className="h-6 w-6 p-0"
+              onClick={() => onOpen(goal)}
+              title={t('goal.tasks.open', { defaultValue: '打开对话' })}
+              aria-label={t('goal.tasks.open', { defaultValue: '打开对话' })}
+              data-task-action="open"
+            >
+              <MessageSquare className="size-3.5" />
+            </Button>
+          ) : null}
         </span>
       </div>
     </li>
@@ -192,6 +193,10 @@ export function TasksPanel(_props?: { ctx?: unknown }) {
     ),
   )
   const rootRef = useRef<HTMLDivElement>(null)
+  // The divider's upper bound is a third of the dock, measured rather than read
+  // during render: a first render reads 0 and would pin the handle at its floor
+  // for the whole session.
+  const [panelHeight, setPanelHeight] = useState(0)
 
   const persistSplit = useCallback((next: number) => {
     setSplit(next)
@@ -275,8 +280,18 @@ export function TasksPanel(_props?: { ctx?: unknown }) {
     return out
   }, [goals])
 
+  useEffect(() => {
+    const el = rootRef.current
+    if (!el) return
+    const measure = () => setPanelHeight(el.clientHeight)
+    measure()
+    const observer = new ResizeObserver(measure)
+    observer.observe(el)
+    return () => observer.disconnect()
+  }, [])
+
   const visible = useMemo(() => (goals ?? []).filter((g) => matches(g, filter)), [goals, filter])
-  const maxSplit = Math.max(SPLIT_MIN + 40, (rootRef.current?.clientHeight ?? 600) - 160)
+  const maxSplit = Math.max(SPLIT_MIN + 40, (panelHeight || 600) - 160)
 
   return (
     <div ref={rootRef} className="flex h-full min-h-0 flex-col overflow-hidden bg-card" data-tasks-panel>

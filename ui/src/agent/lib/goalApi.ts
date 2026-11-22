@@ -113,15 +113,22 @@ export function listGoals(): Promise<{ goals: Goal[] }> {
 }
 
 export function listGoalsForSession(sessionKey: string): Promise<{ goals: Goal[] }> {
-  // A conversation without a key has no goals. Sending `session_key=` would ask
-  // the server for "everything" and paint another conversation's progress here.
-  if (!sessionKey.trim()) {
+  const path = goalsRequestPath(sessionKey)
+  if (!path) {
     return Promise.resolve({ goals: [] })
   }
-  return getHost().api.get<{ goals: Goal[] }>(
-    `/goals?session_key=${encodeURIComponent(sessionKey)}`,
-    base(),
-  )
+  return getHost().api.get<{ goals: Goal[] }>(path, base())
+}
+
+/** goalsRequestPath is the request's path, or null when there is nothing to ask.
+ *
+ * A conversation without a key has no goals. Sending `session_key=` would ask
+ * the server for "everything" and paint another conversation's progress here.
+ */
+export function goalsRequestPath(sessionKey: string): string | null {
+  const key = sessionKey.trim()
+  if (!key) return null
+  return `/goals?session_key=${encodeURIComponent(key)}`
 }
 
 /** pickGoalForSession is the pure form of the rule above, for tests. */

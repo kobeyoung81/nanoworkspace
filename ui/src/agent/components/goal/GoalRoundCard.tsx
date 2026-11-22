@@ -88,6 +88,7 @@ export function GoalRoundCard({
         className="flex w-full items-center gap-1 text-left"
         onClick={() => setOpen((v) => !v)}
         aria-expanded={open}
+        data-goal-round-toggle
       >
         {open ? <ChevronDown className="size-3 shrink-0" /> : <ChevronRight className="size-3 shrink-0" />}
         <span className="shrink-0 text-muted-foreground">第 {round.n + 1} 轮</span>
