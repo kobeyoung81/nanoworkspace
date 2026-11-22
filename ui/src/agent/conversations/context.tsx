@@ -64,6 +64,10 @@ export function useConversationsState(): ConversationsState {
  * the chrome renders while tabs are still opening. */
 export type ActiveConversation = {
   id: string | null
+  /** The stored segment the tab is showing, when it has one. */
+  sessionId: string | null
+  /** The chat the gateway named (the conversation key), once a turn has run. */
+  chatId: string | null
   agentId: string | null
   agentName: string | null
   title?: string
@@ -76,6 +80,10 @@ export function useActiveConversation(): ActiveConversation {
     const tab = state.tabs.find((item) => item.id === state.activeId)
     return {
       id: tab?.id ?? null,
+      // The tab's handle is not a session id; these two are what the server
+      // knows: the segment it was opened on, and the chat it was named after.
+      sessionId: tab?.sessionId ?? null,
+      chatId: tab?.chatId ?? null,
       agentId: tab?.agentId ?? null,
       agentName: tab?.agentName ?? null,
       title: tab?.title,

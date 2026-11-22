@@ -181,7 +181,7 @@ import {
 import { messagesFromProvider, parseProviderMessages } from '../lib/historyMessages'
 import { composeAnswer } from '../lib/questionAnswer'
 import { questionPairs } from '../lib/questionRecord'
-import { hasUnusedPlan, isStoredSessionID, parseSessionMeta, loadSessionMeta } from '../lib/sessionMeta'
+import { hasUnusedPlan, isStoredSessionID, parseSessionMeta, loadSessionMeta, storedSessionID } from '../lib/sessionMeta'
 import { formatToolArgs } from '../lib/toolDisplay'
 
 // Below this width the workbench switches to its mobile layout; the chat area
@@ -2980,7 +2980,7 @@ function AgentWindow({
   const { fresh: chatFresh } = useChatWorkbench()
   useEffect(() => {
     let cancelled = false
-    const sessionID = activeConv.id
+    const sessionID = storedSessionID(activeConv)
     // Only a stored, non-fresh segment can have meta; anything else would answer
     // 404 and leave a red line in the console for a page that works.
     // A stored segment is one the server knows (`channel:chat`, with or without
@@ -3006,7 +3006,7 @@ function AgentWindow({
     return () => {
       cancelled = true
     }
-  }, [activeConv.id, chatFresh])
+  }, [activeConv.sessionId, activeConv.chatId, chatFresh])
 
   const handleAtBottom = useCallback((atBottom: boolean) => {
     atBottomRef.current = atBottom
@@ -3691,13 +3691,14 @@ function Composer({
       setGoalStage('confirm')
       return
     }
-    if (!activeSession.id) {
+    const lookup = storedSessionID(activeSession)
+    if (!lookup) {
       // Nothing to look up: an empty conversation has no plan to reuse.
       setGoalStage('create')
       return
     }
     try {
-      const meta = await loadSessionMeta(activeSession.id)
+      const meta = await loadSessionMeta(lookup)
       if (hasUnusedPlan(meta) && meta.planPath) {
         setGoalPlanRef(meta.planPath)
         setGoalStage('split')
@@ -3707,7 +3708,7 @@ function Composer({
       // No meta is not a reason to block creation: fall through to describing.
     }
     setGoalStage('create')
-  }, [activeSession.id])
+  }, [activeSession.sessionId, activeSession.chatId])
 
   const openGoalFlowRef = useRef<((planRef?: string) => Promise<void>) | null>(null)
   useEffect(() => {

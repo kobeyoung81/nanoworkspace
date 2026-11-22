@@ -100,6 +100,23 @@ export function isStoredSessionID(id: string): boolean {
   return id.includes(':')
 }
 
+/** storedSessionID is the id the server knows for a conversation tab.
+ *
+ * A tab that has been switched to a stored conversation carries that segment's
+ * id. A conversation started in this tab carries no id at all — the gateway
+ * names it and the shell records only the chat — and its first segment is
+ * `web:<chat>`, which is where the meta is. Reading with the tab's own id (the
+ * local `conv-…` handle) answered 404 and silently hid the plan card.
+ */
+export function storedSessionID(conv: {
+  sessionId?: string | null
+  chatId?: string | null
+}): string | null {
+  if (conv.sessionId) return conv.sessionId
+  if (conv.chatId) return `web:${conv.chatId}`
+  return null
+}
+
 export async function loadSessionMeta(sessionId: string): Promise<SessionMetaSnapshot> {
   if (!isStoredSessionID(sessionId)) {
     // Asking the server about a local placeholder would 404 on every new tab.
