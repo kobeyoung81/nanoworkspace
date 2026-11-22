@@ -4225,6 +4225,12 @@ function Composer({
                 : t('goal.mode.running', { defaultValue: '目标执行中' })}
             </span>
           ) : null}
+          {/* The mode group is not rendered while a goal is being created or is
+              running: `hidden` and `flex` are the same property, and which one
+              wins is the stylesheet's order, not the class order — so the switch
+              that replaces the group has to be a render, not a class. Same for
+              the recording strip. */}
+          {goalStage === 'none' && !goalRunning && !voiceActive ? (
           <div
             role="group"
             aria-label={t('agent.modeToggle')}
@@ -4232,8 +4238,6 @@ function Composer({
             className={cn(
               'flex h-9 items-center gap-0.5 rounded-full border bg-muted/50 p-0.5 shadow-sm',
               MODE_GROUP_TIER_CLASS[tier],
-              voiceActive && 'hidden',
-              (goalStage !== 'none' || goalRunning) && 'hidden',
             )}
           >
             <button
@@ -4271,6 +4275,7 @@ function Composer({
               {tier >= MODE_ICON_ONLY_TIER ? null : t('mode.plan')}
             </button>
           </div>
+          ) : null}
           {agentId ? (
             <div
               role="group"
