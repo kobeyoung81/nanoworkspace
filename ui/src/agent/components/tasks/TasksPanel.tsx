@@ -46,17 +46,18 @@ function matches(g: Goal, filter: Filter): boolean {
   return FILTER_STATUSES[filter].includes(g.status)
 }
 
+/** RowAction is one button of a row: resuming is the only one that does not ask. */
+type RowAction = ConfirmKind | 'resume'
+
 /** ActionRow is the set of buttons a goal's state allows (always visible). */
 function ActionRow({
   goal,
   busy,
-  onAct,
-  onDelete,
+  onAction,
 }: {
   goal: Goal
   busy: boolean
-  onAct: (fn: (id: string) => Promise<unknown>, id: string) => void
-  onDelete: (goal: Goal) => void
+  onAction: (goal: Goal, kind: RowAction) => void
 }) {
   const { t } = useTranslation()
   // One source of truth for what a state offers (lib/goalActions + its test).
@@ -70,7 +71,7 @@ function ActionRow({
           variant="ghost"
           className="h-6 w-6 p-0"
           disabled={busy}
-          onClick={() => onAct(pauseGoal, goal.id)}
+          onClick={() => onAction(goal, 'pause')}
           title={t('goal.banner.pause', { defaultValue: '暂停' })}
           aria-label={t('goal.banner.pause', { defaultValue: '暂停' })}
           data-task-action="pause"
@@ -84,7 +85,7 @@ function ActionRow({
           variant="ghost"
           className="h-6 w-6 p-0"
           disabled={busy}
-          onClick={() => onAct(resumeGoal, goal.id)}
+          onClick={() => onAction(goal, 'resume')}
           title={t('goal.banner.resume', { defaultValue: '继续' })}
           aria-label={t('goal.banner.resume', { defaultValue: '继续' })}
           data-task-action="resume"
@@ -98,7 +99,7 @@ function ActionRow({
           variant="ghost"
           className="h-6 w-6 p-0 text-destructive hover:text-destructive"
           disabled={busy}
-          onClick={() => onAct(cancelGoal, goal.id)}
+          onClick={() => onAction(goal, 'cancel')}
           title={t('goal.banner.cancel', { defaultValue: '叫停' })}
           aria-label={t('goal.banner.cancel', { defaultValue: '叫停' })}
           data-task-action="cancel"
@@ -111,7 +112,7 @@ function ActionRow({
         variant="ghost"
         className="h-6 w-6 p-0"
         disabled={busy}
-        onClick={() => onDelete(goal)}
+        onClick={() => onAction(goal, 'delete')}
         title={t('goal.delete.action', { defaultValue: '删除' })}
         aria-label={t('goal.delete.action', { defaultValue: '删除' })}
         data-task-action="delete"
@@ -124,15 +125,13 @@ function ActionRow({
 
 function GoalRow({
   goal,
-  onAct,
+  onAction,
   onOpen,
-  onDelete,
   busy,
 }: {
   goal: Goal
-  onAct: (fn: (id: string) => Promise<unknown>, id: string) => void
+  onAction: (goal: Goal, kind: RowAction) => void
   onOpen: (goal: Goal) => void
-  onDelete: (goal: Goal) => void
   busy: boolean
 }) {
   const { t } = useTranslation()
@@ -158,7 +157,7 @@ function GoalRow({
         </span>
         {goal.last_verdict ? <span className="shrink-0">{goal.last_verdict}</span> : null}
         <span className="ml-auto flex shrink-0 items-center gap-0.5">
-          <ActionRow goal={goal} busy={busy} onAct={onAct} onDelete={onDelete} />
+          <ActionRow goal={goal} busy={busy} onAction={onAction} />
           {taskActions(goal.status).includes('open') ? (
             <Button
               size="sm"
@@ -335,9 +334,14 @@ export function TasksPanel(_props?: { ctx?: unknown }) {
               <GoalRow
                 key={g.id}
                 goal={g}
-                onAct={act}
+                onAction={(goal, kind) => {
+                  if (kind === 'resume') {
+                    void act(resumeGoal, goal.id)
+                    return
+                  }
+                  setConfirming({ kind, id: goal.id })
+                }}
                 onOpen={openGoal}
-                onDelete={(goal) => setConfirming({ kind: 'delete', id: goal.id })}
                 busy={busy}
               />
             ))}
@@ -387,7 +391,11 @@ export function TasksPanel(_props?: { ctx?: unknown }) {
           onConfirm={() => {
             const target = confirming
             setConfirming(null)
-            void act(deleteGoal, target.id)
+            // Both destructive controls ask first (product §5.9): pausing ends
+            // the current round, stopping cannot be undone.
+            const fn =
+              target.kind === 'delete' ? deleteGoal : target.kind === 'pause' ? pauseGoal : cancelGoal
+            void act(fn, target.id)
           }}
         />
       ) : null}

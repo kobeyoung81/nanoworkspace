@@ -5,10 +5,12 @@ import { taskActions } from './goalActions'
 // The panel's row matrix (user's call, 2026-11-21): the buttons must not depend
 // on hover, and a queued goal must offer more than an "open" arrow.
 describe('taskActions', () => {
-  it('offers cancel, delete and open on a queued goal', () => {
-    for (const status of ['draft', 'validating', 'ready']) {
-      expect(taskActions(status)).toEqual(['cancel', 'delete', 'open'])
+  it('offers delete and open on a goal still being written, cancel once it is ready', () => {
+    for (const status of ['draft', 'validating']) {
+      expect(taskActions(status)).toEqual(['delete', 'open'])
     }
+    // Ready is the one queued state the lifecycle lets go to cancelling.
+    expect(taskActions('ready')).toEqual(['cancel', 'delete', 'open'])
   })
 
   it('offers pause, cancel, delete and open while it runs', () => {

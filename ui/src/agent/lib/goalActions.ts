@@ -12,11 +12,13 @@ export type TaskAction = 'pause' | 'resume' | 'cancel' | 'delete' | 'open'
 export function taskActions(status: string): TaskAction[] {
   const running = status === 'running' || status === 'verifying'
   const paused = status === 'paused'
-  const queued = status === 'draft' || status === 'validating' || status === 'ready'
+  // A draft is not running, so stopping it is refused by the lifecycle table
+  // (Draft → Cancelling is not an edge); deleting it is what removes it.
+  const cancellable = running || paused || status === 'ready'
   const out: TaskAction[] = []
   if (running) out.push('pause')
   if (paused) out.push('resume')
-  if (running || paused || queued) out.push('cancel')
+  if (cancellable) out.push('cancel')
   out.push('delete', 'open')
   return out
 }
