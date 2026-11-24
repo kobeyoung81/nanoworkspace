@@ -217,9 +217,11 @@ func (e *Engine) dispatch(ctx context.Context, g *store.Goal) error {
 	content := Build(in, DefaultLimits())
 
 	msg := nanoprotocol.InboundMessage{
-		UserID:    g.UserID,
-		AgentID:   g.AgentID,
-		SessionID: g.SessionKey,
+		UserID:  g.UserID,
+		AgentID: g.AgentID,
+		// The conversation's key carries no channel (the shell strips `web:`), so
+		// the round is addressed to the session the reader is actually in.
+		SessionID: goal.DispatchSessionID(g.SessionKey, g.Channel),
 		Channel:   g.Channel,
 		ChatID:    g.ChatID,
 		SenderID:  "goal",

@@ -101,6 +101,7 @@ import {
   listAgentSessions,
   provisionAgent,
   readAgentSession,
+  readTextFile,
   restartAgent as restartAgentApi,
   uploadFile,
   type SessionSummary,
@@ -109,6 +110,7 @@ import { compactThresholdPct } from '../lib/contextRing'
 import { GoalDraft } from '../components/goal/GoalDraft'
 import { GoalSplitCard } from '../components/goal/GoalCreate'
 import { PlanCard } from '../components/goal/PlanCard'
+import { parsePlanCard, planPathOfResult } from '../lib/planCard'
 import { createDraft, getDraft, listGoals, type DraftView } from '../lib/goalApi'
 import { GoalBanner } from '../components/goal/GoalBanner'
 import { GoalStatusControl } from '../components/goal/GoalStatusControl'
@@ -2714,7 +2716,7 @@ function AgentWindow({
   const [showJump, setShowJump] = useState(false)
   // The conversation's plan: 'unused' means the card under the last message (and
   // the instruction menu) may offer to turn it into a goal (design §14).
-  const [planState, setPlanState] = useState<'none' | 'unused'>('none')
+  const [planState, setPlanState] = useState<'none' | 'unused' | 'used'>('none')
   // The plan the message stream's card offers: the same two meta keys the
   // instruction menu reads (design §14), so the two entries cannot disagree.
   const [planPath, setPlanPath] = useState('')
@@ -2918,23 +2920,8 @@ function AgentWindow({
         ) : (
           <div className="h-4" />
         ),
-      // The plan-completion card sits under the last message and scrolls away
-      // with it (product §5.3): it is the plan this conversation just wrote and
-      // has not turned into a goal yet.
-      Footer: () =>
-        planState === 'unused' && planPath && agentId ? (
-          <div className="px-4 pb-4" data-goal-plan-footer="">
-            <PlanCard
-              agentId={agentId}
-              planPath={planPath}
-              onCreate={(path) =>
-                window.dispatchEvent(new CustomEvent('goal:create', { detail: { planRef: path } }))
-              }
-            />
-          </div>
-        ) : null,
     }),
-    [agentId, hasMoreHistory, loadingOlder, planPath, planState],
+    [hasMoreHistory, loadingOlder],
   )
 
   // The reader's row, read from the rendered rows themselves: the list measures
@@ -2986,7 +2973,7 @@ function AgentWindow({
 
   // The conversation's goals: the banner asks by base key, so a compaction does
   // not detach the banner from its goal.
-  const { activeConversationKey } = useWorkbench()
+  const { activeConversationKey, ops } = useWorkbench()
   // Whether the status control is showing a goal; while it is, the todo counter
   // steps aside (one position, one subject).
   const [goalActive, setGoalActive] = useState(false)
@@ -3009,9 +2996,16 @@ function AgentWindow({
     void loadSessionMeta(sessionID)
       .then((meta) => {
         if (cancelled) return
-        const unused = hasUnusedPlan(meta)
-        setPlanState(unused ? 'unused' : 'none')
-        setPlanPath(unused ? (meta.planPath ?? '') : '')
+        const path = meta.planPath ?? ''
+        if (!path) {
+          setPlanState('none')
+          setPlanPath('')
+          return
+        }
+        // A used plan keeps its card (greyed out) instead of vanishing: the
+        // message it belongs to is still in the transcript.
+        setPlanState(meta.planExecuted === path ? 'used' : 'unused')
+        setPlanPath(path)
       })
       .catch(() => {
         if (cancelled) return
@@ -3022,6 +3016,78 @@ function AgentWindow({
       cancelled = true
     }
   }, [activeConv.sessionId, activeConv.chatId, metaNonce])
+
+  // The plan's text is read once: the card renders it and the status control
+  // counts its steps.
+  const [planText, setPlanText] = useState<string | null>(null)
+  useEffect(() => {
+    if (!planPath || !agentId) {
+      setPlanText(null)
+      return
+    }
+    let cancelled = false
+    readTextFile(agentId, planPath)
+      .then((md: string | null) => {
+        if (!cancelled) setPlanText(md ?? null)
+      })
+      .catch(() => {
+        // A plan that cannot be read still offers the button: the workspace reads
+        // the file again when the draft is created.
+        if (!cancelled) setPlanText(null)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [agentId, planPath])
+  const planSteps = useMemo(() => (planText ? parsePlanCard(planText).steps.length : 0), [planText])
+
+  // The plan-completion card, attached to the message that wrote the plan
+  // (product §5.3: it follows that message, it is not pinned to the list's end).
+  const planCardNode = useMemo(() => {
+    if (planState === 'none' || !planPath || !agentId) return null
+    return (
+      <PlanCard
+        agentId={agentId}
+        planPath={planPath}
+        used={planState === 'used'}
+        text={planText}
+        onCreate={(path) =>
+          window.dispatchEvent(new CustomEvent('goal:create', { detail: { planRef: path } }))
+        }
+      />
+    )
+  }, [agentId, planPath, planState, planText])
+
+  const planCardGroupKey = useMemo(() => {
+    if (!planCardNode) return ''
+    const writeGroups = groups.filter((group) =>
+      (group.run ?? (group.message ? [group.message] : [])).some(
+        (message) =>
+          message.role === 'assistant' &&
+          message.kind === 'tool_group' &&
+          message.tools.some((tool) => tool.name === 'plan_write'),
+      ),
+    )
+    const matching = writeGroups.find((group) =>
+      (group.run ?? (group.message ? [group.message] : [])).some(
+        (message) =>
+          message.role === 'assistant' &&
+          message.kind === 'tool_group' &&
+          message.tools.some(
+            (tool) => tool.name === 'plan_write' && planPathOfResult(tool.result) === planPath,
+          ),
+      ),
+    )
+    // The plan may have been written in a segment this pane has not loaded: fall
+    // back to the last assistant row, which is the closest thing to "where the
+    // plan belongs" without guessing.
+    if (matching) return matching.key
+    if (writeGroups.length > 0) return writeGroups[writeGroups.length - 1].key
+    const assistant = [...groups].reverse().find((group) =>
+      (group.run ?? (group.message ? [group.message] : [])).some((m) => m.role === 'assistant'),
+    )
+    return assistant?.key ?? ''
+  }, [groups, planCardNode, planPath])
 
   const handleAtBottom = useCallback((atBottom: boolean) => {
     atBottomRef.current = atBottom
@@ -3098,6 +3164,7 @@ function AgentWindow({
                 itemContent={(_, group) => (
                   <div className="px-4 pb-4">
                     <MessageGroup group={group} onRetry={handleRetry} />
+                    {planCardNode && group.key === planCardGroupKey ? planCardNode : null}
                   </div>
                 )}
                 components={components}
@@ -3138,7 +3205,10 @@ function AgentWindow({
             sessionKey={activeConversationKey ?? ''}
             planReady={planState !== 'none'}
             planBusy={working && planState !== 'none'}
+            planSteps={planSteps}
+            messages={messages}
             onActiveChange={setGoalActive}
+            onOpenTasks={() => ops.openPanel('tasks')}
           />
         }
       />
@@ -3698,6 +3768,12 @@ function Composer({
   }, [active])
 
   const openGoalFlow = useCallback(async (planRef?: string) => {
+    if (!planRef && !activeConversationKey) {
+      // Without a conversation key there is nothing to hang a draft on. Say so
+      // instead of opening a card that would render nothing.
+      toast.info(t('goal.create.needSession', { defaultValue: '先发一句话，会话才有标识，然后就能设定目标' }))
+      return
+    }
     setGoalPlanRef(undefined)
     setGoalDescription('')
     setGoalInitial(undefined)
@@ -3726,7 +3802,7 @@ function Composer({
       // No meta is not a reason to block creation: fall through to describing.
     }
     setGoalStage('create')
-  }, [activeSession.sessionId, activeSession.chatId])
+  }, [activeConversationKey, activeSession.sessionId, activeSession.chatId, t, toast])
 
   const openGoalFlowRef = useRef<((planRef?: string) => Promise<void>) | null>(null)
   useEffect(() => {
@@ -4313,7 +4389,15 @@ function Composer({
                 voiceActive && 'hidden',
               )}
             >
-              <InstructionsMenu onCommand={sendCommand} onGoal={() => void openGoalFlow()} tier={tier} />
+              <InstructionsMenu
+                onCommand={sendCommand}
+                onGoal={() => void openGoalFlow()}
+                tier={tier}
+                goalDisabled={!activeConversationKey}
+                goalDisabledHint={t('goal.create.needSession', {
+                  defaultValue: '先发一句话，会话才有标识，然后就能设定目标',
+                })}
+              />
             </div>
           ) : null}
           {voiceActive ? (
@@ -4566,10 +4650,15 @@ function InstructionsMenu({
   onCommand,
   onGoal,
   tier,
+  goalDisabled,
+  goalDisabledHint,
 }: {
   onCommand: (command: string) => void
   onGoal: () => void
   tier: number
+  /** A conversation with no identifier yet cannot carry a goal draft. */
+  goalDisabled?: boolean
+  goalDisabledHint?: string
 }) {
   const { t } = useTranslation()
   const iconOnly = tier >= INSTRUCTIONS_ICON_ONLY_TIER
@@ -4623,6 +4712,8 @@ function InstructionsMenu({
               <button
                 key={instruction.id}
                 type="button"
+                disabled={instruction.id === 'goal' && goalDisabled}
+                title={instruction.id === 'goal' && goalDisabled ? goalDisabledHint : undefined}
                 onClick={() => {
                   // The goal card is not a slash command: it opens in place
                   // instead of sending a message the model would have to answer.
@@ -4633,10 +4724,19 @@ function InstructionsMenu({
                   }
                   setOpen(false)
                 }}
-                className="flex w-full items-center gap-2 whitespace-nowrap rounded-md px-2.5 py-1.5 text-left text-xs hover:bg-accent"
+                className={cn(
+                  'flex w-full items-center gap-2 whitespace-nowrap rounded-md px-2.5 py-1.5 text-left text-xs hover:bg-accent',
+                  instruction.id === 'goal' && goalDisabled && 'cursor-not-allowed opacity-50 hover:bg-transparent',
+                )}
+                data-goal-create-entry={instruction.id === 'goal' ? '' : undefined}
               >
                 <Icon className="size-3.5 shrink-0 text-muted-foreground" />
                 {t(instruction.labelKey)}
+                {instruction.id === 'goal' && goalDisabled ? (
+                  <span className="ml-1 text-[10px] text-muted-foreground">
+                    {t('goal.create.needSessionShort', { defaultValue: '先发一句话' })}
+                  </span>
+                ) : null}
               </button>
             )
           })}

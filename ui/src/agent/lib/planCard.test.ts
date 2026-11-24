@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { parsePlanCard } from './planCard'
+import { parsePlanCard, planPathOfResult } from './planCard'
 
 // TestParsePlanCard pins the same rules the workspace's ParsePlan uses, so the
 // card and the pre-filled condition read one plan the same way.
@@ -38,5 +38,19 @@ describe('parsePlanCard', () => {
   it('does not read list items outside the steps section', () => {
     const plan = ['# T', '## 验收', '- 不应算作步骤', '## 步骤', '1. 才算'].join('\n')
     expect(parsePlanCard(plan).steps).toEqual(['才算'])
+  })
+})
+
+describe('planPathOfResult', () => {
+  it('reads the path the tool answered with', () => {
+    expect(
+      planPathOfResult('Plan written to /home/nanosec/agents/nanosec/plans/a.md (812 bytes). Read it back with the read tool.'),
+    ).toBe('/home/nanosec/agents/nanosec/plans/a.md')
+  })
+
+  it('is empty for anything else', () => {
+    expect(planPathOfResult('')).toBe('')
+    expect(planPathOfResult('Error: content is required')).toBe('')
+    expect(planPathOfResult(undefined)).toBe('')
   })
 })

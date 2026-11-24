@@ -36,3 +36,18 @@ export function parsePlanCard(markdown: string): PlanCard {
   }
   return { title: title || '', steps }
 }
+
+/** planPathOfResult reads the path a plan_write call answered with.
+ *
+ * The tool result is "Plan written to <path> (<n> bytes). …"; this mirrors the
+ * agent's own PlanPathFromResult so the card can be attached to the message that
+ * wrote it, not to whatever happens to be last.
+ */
+export function planPathOfResult(result: string | undefined): string {
+  const marker = 'Plan written to '
+  const at = (result ?? '').indexOf(marker)
+  if (at < 0) return ''
+  const rest = (result ?? '').slice(at + marker.length)
+  const stop = rest.indexOf(' (')
+  return (stop >= 0 ? rest.slice(0, stop) : rest).trim()
+}
