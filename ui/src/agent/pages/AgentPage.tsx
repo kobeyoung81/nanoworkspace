@@ -3081,7 +3081,7 @@ function AgentWindow({
     // The plan may have been written in a segment this pane has not loaded: fall
     // back to the last assistant row, which is the closest thing to "where the
     // plan belongs" without guessing.
-    if (matching) return groups[groups.length - 1]?.key ?? matching.key
+    if (matching) return matching.key
     if (writeGroups.length > 0) return writeGroups[writeGroups.length - 1].key
     const assistant = [...groups].reverse().find((group) =>
       (group.run ?? (group.message ? [group.message] : [])).some((m) => m.role === 'assistant'),

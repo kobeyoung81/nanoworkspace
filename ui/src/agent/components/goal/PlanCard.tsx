@@ -9,13 +9,15 @@
 // Once the plan is used the card stays where it is, greyed out: the reader can
 // still open the plan, but there is nothing left to create from it.
 
-import { useMemo, useState } from 'react'
+import { Suspense, lazy, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { ChevronDown, ChevronRight, FileText, Target } from 'lucide-react'
 
 import { cn } from '../../lib/utils'
 import { Button } from '../ui/button'
 import { parsePlanCard } from '../../lib/planCard'
+
+const Markdown = lazy(() => import('../ui/markdown'))
 
 export function PlanCard({
   planPath,
@@ -34,7 +36,6 @@ export function PlanCard({
   const { t } = useTranslation()
   const [open, setOpen] = useState(false)
   const plan = useMemo(() => (text ? parsePlanCard(text) : null), [text])
-  if (used) return null
   const steps = plan?.steps ?? []
   const shown = steps.slice(0, 3)
 
@@ -78,7 +79,9 @@ export function PlanCard({
           className="mt-1.5 max-h-64 overflow-auto rounded border bg-muted/20 px-3 py-2 text-[11px] leading-relaxed"
           data-goal-plan-md
         >
-          <pre className="whitespace-pre-wrap">{text}</pre>
+          <Suspense fallback={<pre className="whitespace-pre-wrap">{text}</pre>}>
+            <Markdown>{text}</Markdown>
+          </Suspense>
         </div>
       ) : null}
       <div className="mt-2 flex items-center justify-end gap-1.5">
