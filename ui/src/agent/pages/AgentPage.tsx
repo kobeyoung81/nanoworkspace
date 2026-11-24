@@ -3293,6 +3293,7 @@ function IndicatorRow({
           type="button"
           onClick={onToggleTodos}
           aria-expanded={showTodos}
+          data-todo-toggle
           className={cn(
             'flex select-none items-center gap-1 rounded-md px-2 py-0.5 text-sm tabular-nums transition-colors hover:bg-accent hover:text-foreground',
             goalControl ? 'ml-2' : 'ml-auto',
