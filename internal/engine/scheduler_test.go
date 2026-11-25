@@ -3,6 +3,7 @@ package engine
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -244,5 +245,79 @@ func TestTick_OneGoalPerAgent(t *testing.T) {
 	}
 	if len(bus.sent) != 0 {
 		t.Fatal("a round was dispatched for an agent that already has one running")
+	}
+}
+
+// TestGoalHistory pins what the judge is told about earlier rounds: the last two
+// only, with the reason that round recorded. The judge prompt asks for RECENT,
+// and this is where it comes from.
+func TestGoalHistory(t *testing.T) {
+	rounds := []store.Round{
+		{N: 0, Verdict: "not_yet", Reason: "first"},
+		{N: 1, Verdict: "not_yet", Reason: "second"},
+		{N: 2, Verdict: "met"}, // no reason recorded: older document
+	}
+	cases := []struct {
+		name   string
+		rounds []store.Round
+		want   int
+		first  int
+	}{
+		{"empty", nil, 0, 0},
+		{"one", rounds[:1], 1, 0},
+		{"three takes the last two", rounds, 2, 1},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			h := goalHistory(tc.rounds, 2)
+			if len(h) != tc.want {
+				t.Fatalf("history = %+v, want %d entries", h, tc.want)
+			}
+			if tc.want == 0 {
+				return
+			}
+			if h[0]["n"] != tc.first {
+				t.Errorf("first entry n = %v, want %d", h[0]["n"], tc.first)
+			}
+		})
+	}
+	// A round written before reasons existed renders as an empty string, not as
+	// a missing key: the agent side reads it without a nil check.
+	last := goalHistory(rounds, 2)[1]
+	if r, ok := last["reason"].(string); !ok || r != "" || last["verdict"] != "met" {
+		t.Errorf("a round without a reason = %+v, want an empty reason", last)
+	}
+}
+
+// TestTick_DispatchCarriesTheHistory is the wiring: the metadata the agent reads
+// really carries the last two rounds, not an empty list.
+func TestTick_DispatchCarriesTheHistory(t *testing.T) {
+	g := dueGoal()
+	g.Rounds = []store.Round{
+		{N: 5, Verdict: "not_yet", Reason: "refresh.go left"},
+		{N: 6, Verdict: "not_yet", Reason: "middleware.go left"},
+	}
+	// ApplyOutcome writes these two together with the round, so a goal that has
+	// rounds has them.
+	g.LastVerdict, g.LastReason = "not_yet", "middleware.go left"
+	st := &fakeStore{due: []*store.Goal{g}, claimOK: true}
+	bus := &fakeBus{}
+	e := New(st, bus, fakeSwitch{on: true}, DefaultConfig())
+	if _, err := e.Tick(context.Background()); err != nil {
+		t.Fatalf("tick: %v", err)
+	}
+	if len(bus.sent) != 1 {
+		t.Fatalf("sent %d messages", len(bus.sent))
+	}
+	history, ok := bus.sent[0].Metadata["goal_history"].([]map[string]any)
+	if !ok || len(history) != 2 {
+		t.Fatalf("goal_history = %#v, want two entries", bus.sent[0].Metadata["goal_history"])
+	}
+	if history[1]["reason"] != "middleware.go left" {
+		t.Errorf("the newest round's reason = %v", history[1]["reason"])
+	}
+	// The brief quotes the same round the history ends with.
+	if !strings.Contains(bus.sent[0].Content, "middleware.go left") {
+		t.Errorf("the brief does not quote the previous round's reason:\n%s", bus.sent[0].Content)
 	}
 }

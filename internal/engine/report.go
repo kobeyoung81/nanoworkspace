@@ -21,6 +21,14 @@ const (
 	VerdictImpossible = "impossible"
 )
 
+// How much of a round's own words one Round record keeps. The summary is quoted
+// into the next round's brief and both reach the judge as RECENT, so they have to
+// be short enough to read and long enough to be worth reading.
+const (
+	roundSummaryRunes = 400
+	roundReasonRunes  = 160
+)
+
 // ErrStaleRound is returned when a report arrives for a round the goal has
 // already moved past: a retry of an old turn must not overwrite a newer one.
 var ErrStaleRound = errors.New("report is for a different round")
@@ -108,7 +116,14 @@ func Decide(g *store.Goal, r Report, now time.Time, verifyEnabled bool) (store.O
 		return store.Outcome{}, fmt.Errorf("verdict %q is not met, not_yet or impossible", r.Verdict)
 	}
 
-	summary := &store.Round{N: g.Round, Verdict: r.Verdict, Files: countFiles(r.Evidence), At: now.UTC()}
+	summary := &store.Round{
+		N: g.Round, Verdict: r.Verdict, Files: countFiles(r.Evidence), At: now.UTC(),
+		// Quoted by the next round's brief and by the judge's RECENT block. The
+		// caps keep one round from dominating the document; the ellipsis is the
+		// signal that something was cut.
+		Summary: clipRunes(r.Summary, roundSummaryRunes),
+		Reason:  clipRunes(r.Reason, roundReasonRunes),
+	}
 	digest := Digest(r.Evidence)
 
 	// The verification round re-proves a "met" verdict. Its own failure is not a

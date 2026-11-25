@@ -206,7 +206,12 @@ func (e *Engine) maxMinutes(g *store.Goal) int {
 // dispatch posts one round's inbound message.
 func (e *Engine) dispatch(ctx context.Context, g *store.Goal) error {
 	verify := g.Status == goal.Verifying
-	in := Input{Goal: g, Verify: verify, Mismatch: g.VerifyResult == "mismatch"}
+	in := Input{
+		Goal:        g,
+		Verify:      verify,
+		Mismatch:    g.VerifyResult == "mismatch",
+		LastSummary: lastRoundSummary(g),
+	}
 	if e.Plan != nil && !verify {
 		if lines, err := e.Plan.PlanLines(ctx, g); err != nil {
 			slog.Warn("plan excerpt unavailable", "goal", g.ID, "error", err)
@@ -228,12 +233,47 @@ func (e *Engine) dispatch(ctx context.Context, g *store.Goal) error {
 		Content:   content,
 		Timestamp: e.Now().UTC(),
 		Metadata: map[string]any{
-			"source":     "goal",
-			"goal_id":    g.ID,
-			"round":      g.Round,
-			"agent_mode": "build",
-			"verify":     verify,
+			"source":       "goal",
+			"goal_id":      g.ID,
+			"round":        g.Round,
+			"agent_mode":   "build",
+			"verify":       verify,
+			"goal_history": goalHistory(g.Rounds, 2),
 		},
 	}
 	return e.Bus.PostInbound(ctx, msg)
+}
+
+// lastRoundSummary is the agent's own account of the round it just finished, as
+// the brief quotes it back. The newest round in the array is the previous one:
+// rounds are appended when they end.
+func lastRoundSummary(g *store.Goal) string {
+	if g == nil || len(g.Rounds) == 0 {
+		return ""
+	}
+	return g.Rounds[len(g.Rounds)-1].Summary
+}
+
+// goalHistory renders the last n rounds as the judge's RECENT block. It runs on
+// the value the scheduler already holds, so the judge sees the same rounds the
+// document carries — no second read, no chance of a different view.
+//
+// The map shape is what crosses the wire: the metadata is JSON inside the
+// inbound message.
+func goalHistory(rounds []store.Round, n int) []map[string]any {
+	if n <= 0 || len(rounds) == 0 {
+		return []map[string]any{}
+	}
+	if len(rounds) > n {
+		rounds = rounds[len(rounds)-n:]
+	}
+	out := make([]map[string]any, 0, len(rounds))
+	for _, r := range rounds {
+		out = append(out, map[string]any{
+			"n":       r.N,
+			"verdict": r.Verdict,
+			"reason":  r.Reason,
+		})
+	}
+	return out
 }

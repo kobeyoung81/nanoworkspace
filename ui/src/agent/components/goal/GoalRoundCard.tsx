@@ -12,6 +12,7 @@ import { ChevronDown, ChevronRight } from 'lucide-react'
 import { cn } from '../../lib/utils'
 import type { AgentToolEntry } from '../../hooks/useAgent'
 import type { Goal } from '../../lib/goalApi'
+import { parseJudgeResult } from '../../lib/goalMessage'
 
 type RoundSummary = NonNullable<Goal['rounds']>[number]
 
@@ -133,7 +134,7 @@ export function GoalRoundCard({
           ) : null}
           {entry?.result ? (
             <p className="text-muted-foreground" data-goal-round-judge>
-              {entry.result.length > 400 ? `${entry.result.slice(0, 400)}…` : entry.result}
+              {judgeText(entry.result)}
             </p>
           ) : (
             <p className="text-muted-foreground">
@@ -144,4 +145,13 @@ export function GoalRoundCard({
       ) : null}
     </li>
   )
+}
+
+// judgeText is the round card's one line. The report answers JSON now, and the
+// reason is the part worth reading; an older sentence-shaped answer is shown as
+// it is rather than dropped.
+function judgeText(result: string): string {
+  const parsed = parseJudgeResult(result)
+  const text = parsed ? [parsed.verdict, parsed.reason].filter(Boolean).join(' · ') : result
+  return text.length > 400 ? `${text.slice(0, 400)}…` : text
 }

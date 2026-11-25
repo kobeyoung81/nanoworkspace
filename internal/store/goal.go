@@ -15,9 +15,13 @@ import (
 
 const goalsCollection = "workspace_goals"
 
-// roundSummaryLimit caps the embedded summaries. The design bounds a goal
-// document at roughly 10 KB: the rounds are what a panel shows, the evidence
-// stays in the conversation.
+// roundSummaryLimit caps the embedded summaries. Only the last two rounds are
+// ever quoted (the next round's brief and the judge's RECENT block) and the
+// panel shows the rest, so the array is bounded by count: the evidence itself
+// stays in the conversation. With summary and reason recorded it can reach tens
+// of kilobytes on a goal that uses its whole budget — small next to the 16 MB
+// document limit, and the alternative (a per-round collection) buys nothing at
+// this size.
 const roundSummaryLimit = 40
 
 var (
@@ -43,10 +47,17 @@ type ProofStep struct {
 
 // Round is the summary of one round: what was judged and how many files moved.
 // It never carries the evidence itself.
+//
+// Summary and Reason are what the next round's briefing and the judge's RECENT
+// block quote: the agent's own account of the round and the judge's one-line
+// answer to it. Rounds written before they existed simply lack them, and every
+// reader treats a missing string as "not recorded".
 type Round struct {
 	N       int       `bson:"n" json:"n"`
 	Verdict string    `bson:"verdict" json:"verdict"`
 	Files   int       `bson:"files" json:"files"`
+	Summary string    `bson:"summary,omitempty" json:"summary,omitempty"`
+	Reason  string    `bson:"reason,omitempty" json:"reason,omitempty"`
 	At      time.Time `bson:"at" json:"at"`
 }
 
@@ -484,6 +495,19 @@ func (s *Store) ApplyOutcome(ctx context.Context, userID, id string, o Outcome, 
 			bson.D{{Key: "$set", Value: bson.D{{Key: "rounds", Value: bson.A{}}}}}); err != nil {
 			return fmt.Errorf("initialise rounds: %w", err)
 		}
+	}
+
+	// last_verdict / last_reason are the short version of the round about to be
+	// recorded: the panel's banner reads them, and the next round's brief quotes
+	// them. Written in the same $set as the rest of the outcome, so the two can
+	// never disagree. (AppendRound does the same for the paths that use it.)
+	// It has to be appended before `update` is built: update holds the slice
+	// header, so a later append would be lost.
+	if o.Summary != nil {
+		set = append(set,
+			bson.E{Key: "last_verdict", Value: o.Summary.Verdict},
+			bson.E{Key: "last_reason", Value: o.Summary.Reason},
+		)
 	}
 
 	update := bson.D{{Key: "$set", Value: set}}

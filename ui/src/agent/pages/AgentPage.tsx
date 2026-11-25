@@ -114,6 +114,9 @@ import { parsePlanCard, planPathOfResult } from '../lib/planCard'
 import { createDraft, getDraft, listGoals, type DraftView } from '../lib/goalApi'
 import { GoalBanner } from '../components/goal/GoalBanner'
 import { GoalStatusControl } from '../components/goal/GoalStatusControl'
+import { GoalRoundPrompt } from '../components/goal/GoalRoundPrompt'
+import { GoalJudgeCard } from '../components/goal/GoalJudgeCard'
+import { parseGoalPrompt, parseJudgeResult } from '../lib/goalMessage'
 import { describeProgress, getIntakeDraft, onIntakeDraftChange, setIntakeDraft } from '../lib/goalIntake'
 import { TasksPanel } from '../components/tasks/TasksPanel'
 import { conversationModeOf, defaultModeOf, resolveAgentMode } from '../lib/agentMode'
@@ -5168,18 +5171,48 @@ const MessageGroup = memo(function MessageGroup({
   group: { key: string; run?: AgentMessage[]; message?: AgentMessage }
   onRetry: () => void
 }) {
+  // The judge's verdict belongs to the round, not to the tool list: it is
+  // rendered beside the row, never inside the folded group, so folding the tools
+  // cannot hide the one conclusion of the round.
+  const judge = useMemo(() => judgeOfGroup(group), [group])
   if (group.run) {
     return (
-      <RunBlock
-        messages={group.run}
-        streaming={group.run.some(
-          (m) => m.role === 'assistant' && (m.kind === 'thought' || m.kind === 'tool_group') && m.streaming,
-        )}
-      />
+      <>
+        <RunBlock
+          messages={group.run}
+          streaming={group.run.some(
+            (m) => m.role === 'assistant' && (m.kind === 'thought' || m.kind === 'tool_group') && m.streaming,
+          )}
+        />
+        {judge ? <GoalJudgeCard result={judge} /> : null}
+      </>
     )
   }
-  return <MessageBubble message={group.message as AgentMessage} onRetry={onRetry} />
+  return (
+    <>
+      <MessageBubble message={group.message as AgentMessage} onRetry={onRetry} />
+      {judge ? <GoalJudgeCard result={judge} /> : null}
+    </>
+  )
 })
+
+// judgeOfGroup finds the round's verdict in the group's tool groups. The newest
+// goal_report wins: a run can hold several tool groups, and the report is the
+// last thing a round does.
+function judgeOfGroup(group: { run?: AgentMessage[]; message?: AgentMessage }) {
+  const messages = group.run ?? (group.message ? [group.message] : [])
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const message = messages[i]
+    if (message.role !== 'assistant' || message.kind !== 'tool_group') continue
+    for (let j = message.tools.length - 1; j >= 0; j--) {
+      const tool = message.tools[j]
+      if (tool.name !== 'goal_report' || !tool.result) continue
+      const parsed = parseJudgeResult(tool.result)
+      if (parsed) return parsed
+    }
+  }
+  return null
+}
 
 // groupMessages merges each maximal consecutive run of assistant thought /
 // tool_group messages into a single run so long think→tool chains render as one
@@ -5247,7 +5280,7 @@ function RunBlock({ messages, streaming }: { messages: AgentMessage[]; streaming
   }
 
   return (
-    <div className="flex justify-start">
+    <div className="flex justify-start" data-tool-group="" data-tool-group-kind="run">
       {/* Fit to content, at every level: the card is as wide as what it holds,
           and what it holds is what decides. Expanded, that means the width of the
           widest block inside it — not the width of the transcript. The cap is
@@ -5326,13 +5359,24 @@ const MessageBubble = memo(function MessageBubble({
 }) {
   const isUser = message.role === 'user'
   if (isUser) {
+    // A goal round's brief arrives as an inbound message, so it lands in the
+    // transcript as a user message. It is the platform talking, not the reader:
+    // rendering it in the user's bubble is what made the two indistinguishable.
+    const prompt = parseGoalPrompt(message.content)
+    if (prompt) {
+      return <GoalRoundPrompt prompt={prompt} content={message.content} />
+    }
     // The bubble is a pale tint carrying ordinary foreground text: the markdown
     // colours come from the theme's prose palette (dark:prose-invert included).
     // Forcing prose-invert here is what used to render light grey text on the
     // saturated primary, so the contrast was well under 4.5:1.
     return (
-      <div className="flex justify-end">
-        <div className="min-w-0 max-w-[75%] break-words rounded-lg rounded-br-sm border border-user-message-border bg-user-message px-3 py-2 text-sm leading-relaxed text-user-message-foreground [overflow-wrap:anywhere]">
+      <div className="flex flex-col items-end gap-0.5">
+        <SpeakerTag kind="you" />
+        <div
+          data-user-message=""
+          className="min-w-0 max-w-[75%] break-words rounded-lg rounded-br-sm border border-user-message-border bg-user-message px-3 py-2 text-sm leading-relaxed text-user-message-foreground [overflow-wrap:anywhere]"
+        >
           {message.content ? (
             <Suspense fallback={<p className="whitespace-pre-wrap">{message.content}</p>}>
               <Markdown>{message.content}</Markdown>
@@ -5358,7 +5402,8 @@ const MessageBubble = memo(function MessageBubble({
       return <CompactionDivider summary={message.summary} streaming={message.streaming} />
     default:
       return (
-        <div className="flex justify-start">
+        <div className="flex flex-col items-start gap-0.5">
+          <SpeakerTag kind="agent" />
           <div className="min-w-0 max-w-full break-words rounded-lg rounded-bl-sm border bg-card px-3 py-2 text-sm leading-relaxed [overflow-wrap:anywhere]">
             {message.content ? (
               <Suspense fallback={<p className="whitespace-pre-wrap">{message.content}</p>}>
@@ -5374,6 +5419,19 @@ const MessageBubble = memo(function MessageBubble({
       )
   }
 })
+
+// SpeakerTag names who is talking. Four speakers now share one transcript — the
+// reader, the agent, the platform (a goal round's brief) and the judge (its
+// verdict) — and without a name the four read as one voice. It is deliberately
+// small and quiet: it labels, it does not decorate.
+function SpeakerTag({ kind }: { kind: 'you' | 'agent' }) {
+  const { t } = useTranslation()
+  return (
+    <span className="px-1 text-[10px] leading-none text-muted-foreground/70" data-speaker={kind}>
+      {kind === 'you' ? t('goal.speaker.you', { defaultValue: '你' }) : t('goal.speaker.agent', { defaultValue: '智能体' })}
+    </span>
+  )
+}
 
 // ThoughtBlock renders the agent's reasoning. Folded by default; the label
 // flashes while thoughts stream and reads "Thought for Xs" once finished.
@@ -5416,7 +5474,7 @@ function ToolGroupBlock({ message }: { message: Extract<AgentMessage, { kind: 't
   const [expanded, setExpanded] = useState(false)
   const count = message.tools.length
   return (
-    <div className="flex justify-start">
+    <div className="flex justify-start" data-tool-group="" data-tool-group-kind="tools">
       <div className="w-fit min-w-0 max-w-full overflow-hidden break-words rounded-lg rounded-bl-sm border bg-muted/20 text-xs">
         <button
           type="button"
