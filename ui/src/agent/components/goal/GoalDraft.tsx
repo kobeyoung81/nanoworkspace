@@ -246,7 +246,7 @@ export function GoalDraft({ agentId, sessionKey, planRef, initialCondition, init
 
       {/* The six rows are the part that scrolls: the header and the action bar
           stay put, so "开始" and "还差：…" are readable at any scroll offset. */}
-      <div className="min-h-0 flex-1 overflow-hidden overscroll-contain px-3" data-goal-draft-scroll>
+      <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-3" data-goal-draft-scroll>
         <Row
           label={t('goal.check.condition', { defaultValue: '完成条件' })}
           value={draft.condition ?? ''}
