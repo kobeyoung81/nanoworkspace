@@ -91,7 +91,7 @@ export function GoalStatusControl({
   // started goal takes the composer over (product §5.2 / §5.6) — treating a
   // leftover draft as "running" kept build/plan switched off until it was deleted
   // by hand in the tasks panel.
-  const started = goal !== null && goal.status !== 'draft'
+  const started = goal !== null
 
   useEffect(() => {
     onActiveChange?.(started)
