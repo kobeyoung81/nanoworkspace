@@ -228,7 +228,7 @@ export function GoalDraft({ agentId, sessionKey, planRef, initialCondition, init
     // resolve to nothing. 60vh leaves room for the field and the status line on
     // the shortest phone we support.
     <div
-      className="m-2 flex max-h-[min(60vh,30rem)] min-h-0 flex-col overflow-hidden rounded-lg border bg-card shadow-sm lg:max-h-[min(56vh,34rem)]"
+      className="m-2 flex max-h-[min(60vh,30rem)] min-h-0 flex-col overflow-hidden rounded-lg border bg-card shadow-sm lg:max-h-[min(72vh,40rem)]"
       data-goal-draft={draft.id}
     >
       <div className="flex shrink-0 items-center gap-2 border-b bg-muted/40 px-3 py-2">
