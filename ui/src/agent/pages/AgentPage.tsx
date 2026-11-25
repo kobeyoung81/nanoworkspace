@@ -4169,7 +4169,11 @@ function Composer({
   }
 
   return (
-    <form ref={composerRef} onSubmit={submit} className="p-3 pt-1">
+    // `max-h-full` + scrolling is the last line of defence for a very short
+    // viewport (or a phone with the keyboard up): the card inside is capped, but
+    // the field and its status row can still exceed the pane. With this, the
+    // composer scrolls instead of being clipped by the workbench.
+    <form ref={composerRef} onSubmit={submit} className="max-h-full min-h-0 overflow-y-auto p-3 pt-1">
       {selectedAgent && activeConversationKey ? (
         <>
           {goalStage === 'split' ? (

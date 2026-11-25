@@ -87,9 +87,15 @@ export function GoalStatusControl({
     }
   }, [refresh])
 
+  // A draft is not a goal yet: it is a card the reader is still filling in. Only a
+  // started goal takes the composer over (product §5.2 / §5.6) — treating a
+  // leftover draft as "running" kept build/plan switched off until it was deleted
+  // by hand in the tasks panel.
+  const started = goal !== null && goal.status !== 'draft'
+
   useEffect(() => {
-    onActiveChange?.(!!goal)
-  }, [goal, onActiveChange])
+    onActiveChange?.(started)
+  }, [started, onActiveChange])
 
   const act = async (fn: (id: string) => Promise<unknown>) => {
     if (!goal) return
@@ -102,7 +108,7 @@ export function GoalStatusControl({
     }
   }
 
-  if (goal) {
+  if (goal && started) {
     const pct = goal.max_rounds > 0 ? Math.min(100, Math.round(((goal.round + 1) / goal.max_rounds) * 100)) : 0
     const running = goal.status === 'running' || goal.status === 'verifying'
     const minutes = minutesSince(goal.started_at ?? goal.updated_at)

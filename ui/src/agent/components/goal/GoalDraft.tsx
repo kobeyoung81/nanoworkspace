@@ -10,7 +10,7 @@ import { AlertTriangle, CheckCircle2, Pencil, Target, X } from 'lucide-react'
 
 import { cn } from '../../lib/utils'
 import { Button } from '../ui/button'
-import { answerDraft, createDraft, getDraft, startDraft, type DraftView, type Goal } from '../../lib/goalApi'
+import { answerDraft, createDraft, deleteGoal, getDraft, startDraft, type DraftView, type Goal } from '../../lib/goalApi'
 
 type Props = {
   agentId: string
@@ -55,7 +55,7 @@ function Row({
   return (
     <div className="flex flex-col gap-1 border-b py-2 last:border-b-0" data-goal-row={label}>
       <div className="flex items-center gap-2">
-        <span className="w-24 shrink-0 text-xs text-muted-foreground">{label}</span>
+        <span className="w-20 shrink-0 text-xs text-muted-foreground sm:w-24">{label}</span>
         {editing ? null : (
           <>
             <span className={cn('min-w-0 flex-1 text-sm', !value && 'text-muted-foreground')}>
@@ -68,7 +68,7 @@ function Row({
         )}
       </div>
       {editing ? (
-        <div className="flex flex-col gap-1 pl-24">
+        <div className="flex flex-col gap-1 pl-20 sm:pl-24">
           {rows && rows > 1 ? <textarea rows={rows} {...shared} /> : <input {...shared} />}
           {hint ? <span className="text-[11px] text-muted-foreground">{hint}</span> : null}
           <div className="flex gap-2">
@@ -164,6 +164,26 @@ export function GoalDraft({ agentId, sessionKey, planRef, initialCondition, init
     [view],
   )
 
+  // Closing the card abandons the draft: it was never a goal. Leaving the row in
+  // the store kept the tasks panel showing a "task" nobody had started, and it
+  // kept the composer in goal mode until the row was deleted by hand.
+  const [closing, setClosing] = useState(false)
+  const dismiss = async () => {
+    if (closing) return
+    setClosing(true)
+    const id = view?.draft.id
+    if (id) {
+      try {
+        await deleteGoal(id)
+      } catch {
+        // The card closes anyway: a failed delete is not a reason to trap the
+        // reader, and the tasks panel still offers delete.
+      }
+    }
+    setClosing(false)
+    onClose()
+  }
+
   const start = async () => {
     if (!view) return
     setBusy(true)
@@ -180,7 +200,7 @@ export function GoalDraft({ agentId, sessionKey, planRef, initialCondition, init
     return (
       <div className="m-2 rounded-lg border border-destructive/40 bg-destructive/5 p-3 text-sm" data-goal-draft="error">
         <span>{error}</span>
-        <Button size="sm" variant="ghost" onClick={onClose}>
+        <Button size="sm" variant="ghost" onClick={dismiss}>
           <X className="size-3.5" />
         </Button>
       </div>
@@ -203,8 +223,15 @@ export function GoalDraft({ agentId, sessionKey, planRef, initialCondition, init
   const proofLine = (draft.proof ?? []).map((p) => p.note || p.cmd || p.path || '').filter(Boolean).join('；')
 
   return (
-    <div className="m-2 overflow-hidden rounded-lg border bg-card shadow-sm" data-goal-draft={draft.id}>
-      <div className="flex items-center gap-2 border-b bg-muted/40 px-3 py-2">
+    // A cap in viewport units, not a percentage: this card lives inside the
+    // composer's form, whose height is auto, so a percentage `max-height` would
+    // resolve to nothing. 60vh leaves room for the field and the status line on
+    // the shortest phone we support.
+    <div
+      className="m-2 flex max-h-[min(60vh,30rem)] min-h-0 flex-col overflow-hidden rounded-lg border bg-card shadow-sm lg:max-h-[min(56vh,34rem)]"
+      data-goal-draft={draft.id}
+    >
+      <div className="flex shrink-0 items-center gap-2 border-b bg-muted/40 px-3 py-2">
         <Target className="size-4 shrink-0 text-primary" />
         <span className="text-sm font-medium">
           {t('goal.draft.cardTitle', { defaultValue: '◎ 长程目标 · 待确认' })}
@@ -212,12 +239,14 @@ export function GoalDraft({ agentId, sessionKey, planRef, initialCondition, init
         <span className="ml-auto text-[11px] text-muted-foreground">
           {t('goal.draft.progress', { defaultValue: '目标补全 {{done}}/6', done: filled })}
         </span>
-        <Button size="sm" variant="ghost" onClick={onClose} aria-label={t('common.close', { defaultValue: '关闭' })}>
+        <Button size="sm" variant="ghost" onClick={dismiss} aria-label={t('common.close', { defaultValue: '关闭' })}>
           <X className="size-3.5" />
         </Button>
       </div>
 
-      <div className="px-3">
+      {/* The six rows are the part that scrolls: the header and the action bar
+          stay put, so "开始" and "还差：…" are readable at any scroll offset. */}
+      <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-3" data-goal-draft-scroll>
         <Row
           label={t('goal.check.condition', { defaultValue: '完成条件' })}
           value={draft.condition ?? ''}
@@ -275,7 +304,7 @@ export function GoalDraft({ agentId, sessionKey, planRef, initialCondition, init
       </div>
 
       {blockers.length > 0 ? (
-        <div className="border-t border-destructive/30 bg-destructive/5 px-3 py-2 text-xs text-destructive" data-goal-blockers>
+        <div className="shrink-0 border-t border-destructive/30 bg-destructive/5 px-3 py-2 text-xs text-destructive" data-goal-blockers>
           {blockers.map((b) => (
             <div key={b} className="flex items-start gap-1">
               <AlertTriangle className="mt-0.5 size-3.5 shrink-0" />
@@ -285,7 +314,7 @@ export function GoalDraft({ agentId, sessionKey, planRef, initialCondition, init
         </div>
       ) : null}
 
-      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-t bg-muted/20 px-3 py-2 text-[11px] text-muted-foreground">
+      <div className="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-1 border-t bg-muted/20 px-3 py-2 text-[11px] text-muted-foreground">
         <span className="font-medium">{t('goal.draft.riskLabel', { defaultValue: '风险' })}</span>
         {risks.map((r) => (
           <span key={r} className="flex items-center gap-1">
@@ -295,7 +324,7 @@ export function GoalDraft({ agentId, sessionKey, planRef, initialCondition, init
         ))}
       </div>
 
-      <div className="flex items-center gap-2 border-t px-3 py-2">
+      <div className="flex shrink-0 items-center gap-2 border-t px-3 py-2" data-goal-draft-footer>
         {missing.length > 0 ? (
           <span className="text-xs text-amber-600" data-goal-missing>
             {t('goal.draft.missing', { defaultValue: '还差：' })}
@@ -305,7 +334,7 @@ export function GoalDraft({ agentId, sessionKey, planRef, initialCondition, init
           <span className="text-xs text-emerald-600">{t('goal.draft.ready', { defaultValue: '六项齐全，可以开始' })}</span>
         )}
         <div className="ml-auto flex items-center gap-2">
-          <Button size="sm" variant="ghost" onClick={onClose}>
+          <Button size="sm" variant="ghost" onClick={dismiss}>
             {t('common.cancel', { defaultValue: '取消' })}
           </Button>
           {ready ? (
