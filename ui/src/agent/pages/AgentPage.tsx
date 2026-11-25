@@ -5177,7 +5177,7 @@ const MessageGroup = memo(function MessageGroup({
   const judge = useMemo(() => judgeOfGroup(group), [group])
   if (group.run) {
     return (
-      <div data-tool-group="" data-tool-group-kind="run">
+      <>
         <RunBlock
           messages={group.run}
           streaming={group.run.some(
@@ -5185,7 +5185,7 @@ const MessageGroup = memo(function MessageGroup({
           )}
         />
         {judge ? <GoalJudgeCard result={judge} /> : null}
-      </div>
+      </>
     )
   }
   return (
